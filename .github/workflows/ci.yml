@@ -1,0 +1,48 @@
+name: Rust validation
+on:
+  push:
+    branches: [main, codex/anny-rust-native-port]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: anny-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: rustfmt, clippy
+      - name: Test native workspace
+        if: hashFiles('Cargo.toml') != ''
+        run: |
+          cargo fmt --all -- --check
+          cargo test --workspace
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo check -p anny-wasm --target wasm32-unknown-unknown
+  reference:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: naver/anny
+          ref: 81ca83e202273b306205c1cc15f33734be31e48c
+          path: .upstream
+      - name: Archive pinned reference source
+        run: |
+          mkdir -p reference-source
+          cp -r .upstream/src/anny reference-source/
+          cp -r .upstream/test .upstream/scripts reference-source/
+          cp .upstream/LICENSE .upstream/README.md reference-source/
+          rm -rf reference-source/anny/data
+      - uses: actions/upload-artifact@v4
+        with:
+          name: upstream-reference-source
+          path: reference-source/
+          retention-days: 7
