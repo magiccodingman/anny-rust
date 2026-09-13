@@ -1,0 +1,44 @@
+# Temporary development input packaging; removed in the extension commit.
+name: Extension bootstrap
+on:
+  push:
+    paths: [.github/workflows/extension-bootstrap.yml]
+permissions:
+  contents: read
+jobs:
+  inputs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.90.0
+      - name: Package exact source and offline dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p bundle/deps/src
+          git archive --format=tar HEAD > bundle/source.tar
+          git rev-parse HEAD > bundle/source-commit.txt
+          cp Cargo.toml bundle/workspace-manifest.txt
+          printf 'fn main() {}\n' > bundle/deps/src/main.rs
+          cat > bundle/deps/Cargo.toml <<'EOF'
+          [package]
+          name = "anny-extension-dependencies"
+          version = "0.1.0"
+          edition = "2021"
+          [dependencies]
+          zip = { version = "=0.6.6", default-features = false, features = ["deflate"] }
+          serde_yaml = "=0.9.34"
+          base64 = "=0.22.1"
+          EOF
+          cd bundle/deps
+          cargo vendor ../vendor > config.toml
+          cd ../..
+          tar -czf extension-inputs.tar.gz -C bundle .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: extension-inputs
+          path: extension-inputs.tar.gz
+          retention-days: 1
+          compression-level: 0
