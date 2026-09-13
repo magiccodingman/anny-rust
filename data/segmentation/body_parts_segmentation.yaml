@@ -1,0 +1,16 @@
+colors:
+  body: [0, 0, 0]
+  head: [90, 86, 255]
+  hand.R: [255, 29, 35]
+  hand.L: [7, 255, 0]
+  eye_back.L: [255, 101, 0]
+  eye_front.L: [16, 231, 186]
+  eye_back.R: [24, 170, 109]
+  eye_front.R: [16, 115, 231]
+  eye_cavity.R: [253, 249, 16]
+  eye_cavity.L: [249, 108, 136]
+  mouth_cavity: [112, 172, 255]
+  foot.L: [254, 251, 251]
+  foot.R: [255, 0, 245]
+  tongue: [206, 153, 167]
+
