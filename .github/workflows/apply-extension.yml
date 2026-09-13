@@ -1,0 +1,49 @@
+# Temporary delivery workflow; removed after the source commit is verified.
+name: Native extension delivery
+on:
+  push:
+    branches: [codex/anny-rust-native-port]
+    paths: [.github/extension-payload.b64]
+permissions:
+  contents: write
+jobs:
+  deliver:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: dtolnay/rust-toolchain@1.90.0
+        with:
+          targets: wasm32-unknown-unknown
+          components: rustfmt, clippy
+      - name: Apply and validate exact source patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/codex/anny-rust-native-port
+          base64 --decode .github/extension-payload.b64 | gzip --decompress > "$RUNNER_TEMP/extension.patch"
+          git apply --check "$RUNNER_TEMP/extension.patch"
+          git apply "$RUNNER_TEMP/extension.patch"
+          cargo fmt --all -- --check
+          cargo test --workspace --locked
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+          cargo check -p anny-wasm --target wasm32-unknown-unknown --locked
+          cargo test -p anny-core --release --locked --test native_import -- --ignored --nocapture
+          cargo build -p anny-cli --release --locked
+          ./target/release/anny verify-assets --assets data
+      - name: Commit tested source without touching assets or main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add -- Cargo.toml Cargo.lock crates docs README.md
+          if git diff --cached --name-only | grep -E '^(data/|\.github/workflows/)'; then
+            echo 'Unexpected protected-path change' >&2
+            exit 1
+          fi
+          test "$(git ls-remote origin refs/heads/codex/anny-rust-native-port | cut -f1)" = "$GITHUB_SHA"
+          git config user.name 'Anny Rust port'
+          git config user.email '131926685+magiccodingman@users.noreply.github.com'
+          git commit -m "Implement native upstream import and bounded PyTorch tensor archive decoding"
+          git push origin HEAD:refs/heads/codex/anny-rust-native-port
+          git rev-parse HEAD
