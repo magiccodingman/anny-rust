@@ -3,7 +3,7 @@ name: Native extension delivery
 on:
   push:
     branches: [codex/anny-rust-native-port]
-    paths: [.github/extension-payload.b64]
+    paths: ['.github/extension-payload/**']
 permissions:
   contents: write
 jobs:
@@ -22,7 +22,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = refs/heads/codex/anny-rust-native-port
-          base64 --decode .github/extension-payload.b64 | gzip --decompress > "$RUNNER_TEMP/extension.patch"
+          cat .github/extension-payload/*.b64 | base64 --decode | gzip --decompress > "$RUNNER_TEMP/extension.patch"
           git apply --check "$RUNNER_TEMP/extension.patch"
           git apply "$RUNNER_TEMP/extension.patch"
           cargo fmt --all -- --check
