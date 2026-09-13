@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Anny Rust WASM smoke example</title>
+<h1>Native Anny in WebAssembly</h1>
+<p>Choose a prepared ModelData Safetensors file. This smoke example reports geometry; it is not a 3D viewer.</p>
+<input type="file" id="model" accept=".safetensors"><pre id="result">Build anny-wasm with wasm-pack first; see README.</pre>
+<script type="module">
+import init, { AnnyModel } from './pkg/anny_wasm.js';
+await init();
+document.querySelector('#model').addEventListener('change', async event => {
+    let model, output;
+    const result = document.querySelector('#result');
+    try {
+        const file = event.target.files[0];
+        if (!file) return;
+        result.textContent = 'Loading model...';
+        model = new AnnyModel(new Uint8Array(await file.arrayBuffer()));
+        output = model.evaluate(JSON.stringify({phenotype_kwargs:{height:0.6,weight:0.4}}));
+        const shape = output.shape('vertices');
+        const vertices = output.tensor('vertices');
+        const faces = model.indices('faces');
+        result.textContent = `Vertices shape: ${Array.from(shape)}\nIndex entries: ${faces.length}\nFirst vertex: ${Array.from(vertices.slice(0,3))}\n\n${model.describe()}`;
+        // vertices and faces are independent typed-array copies. They remain valid
+        // after output/model.free(), and can be uploaded to a renderer by the host.
+    } catch (error) { result.textContent = String(error); }
+    finally { output?.free(); model?.free(); }
+});
+</script></html>

@@ -1,9 +1,14 @@
 name: Rust validation
 on:
+  pull_request:
   push:
     branches: [main, codex/anny-rust-native-port]
-  pull_request:
   workflow_dispatch:
+    inputs:
+      parity:
+        description: 'Build and compare all 23 Python reference cases'
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -14,18 +19,30 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.90.0
         with:
           targets: wasm32-unknown-unknown
           components: rustfmt, clippy
-      - name: Test native workspace
-        if: hashFiles('Cargo.toml') != ''
-        run: |
-          cargo fmt --all -- --check
-          cargo test --workspace
-          cargo clippy --workspace --all-targets -- -D warnings
-          cargo check -p anny-wasm --target wasm32-unknown-unknown
-  reference:
+      - run: cargo fmt --all -- --check
+      - run: cargo test --workspace --locked
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo check -p anny-wasm --target wasm32-unknown-unknown --locked
+      - run: cargo build --workspace --release --locked
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet build examples/csharp --configuration Release
+  portable:
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.90.0
+      - run: cargo test --workspace --locked
+  parity:
+    if: github.event_name == 'workflow_dispatch' && inputs.parity
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -34,15 +51,31 @@ jobs:
           repository: naver/anny
           ref: 81ca83e202273b306205c1cc15f33734be31e48c
           path: .upstream
-      - name: Archive pinned reference source
-        run: |
-          mkdir -p reference-source
-          cp -r .upstream/src/anny reference-source/
-          cp -r .upstream/test .upstream/scripts reference-source/
-          cp .upstream/LICENSE .upstream/README.md reference-source/
-          rm -rf reference-source/anny/data
-      - uses: actions/upload-artifact@v4
+      - uses: dtolnay/rust-toolchain@1.90.0
+      - uses: actions/setup-python@v5
         with:
-          name: upstream-reference-source
-          path: reference-source/
+          python-version: '3.13'
+      - name: Install reference-only Python dependencies
+        run: |
+          python -m pip install torch==2.10.0 --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install roma==1.6.1 safetensors==0.7.0 warp-lang==1.9.1 pyyaml pillow numpy trimesh requests
+          python -m pip install --no-deps ./.upstream
+      - run: cargo build -p anny-cli --release --locked
+      - run: python tools/import_assets.py --source .upstream --destination output/data
+      - name: Generate Python fixtures
+        env:
+          ANNY_CACHE_DIR: ${{ github.workspace }}/output/reference-cache
+          PYTHONPATH: ${{ github.workspace }}/.upstream/src
+          OMP_NUM_THREADS: '2'
+        run: python tools/export_reference.py --output output/fixtures --cases all-cases
+      - name: Compare native output
+        run: python tools/check_parity.py --assets output/data --fixtures output/fixtures --summary output/parity-summary.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: parity-results
+          path: |
+            output/parity-summary.json
+            output/fixtures/*/comparison.json
+            output/fixtures/*/native.log
           retention-days: 7

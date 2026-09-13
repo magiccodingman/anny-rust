@@ -1,0 +1,39 @@
+//! Native, deterministic Anny geometry. No Python or tensor-framework runtime.
+//! See `docs/COMPATIBILITY.md` for the exact upstream revision and contracts.
+#![forbid(unsafe_code)]
+pub mod assets;
+pub mod config;
+pub mod distribution;
+pub mod inverter;
+pub mod math;
+pub mod mesh;
+pub mod model;
+pub mod smpl;
+pub mod tensor;
+pub mod tools;
+
+pub use config::{AnnyConfig, PoseParameterization, SkinningMethod};
+pub use model::{Anny, ModelData, ModelOutput, Parameters};
+pub use tensor::Tensor;
+pub const UPSTREAM_REVISION: &str = "81ca83e202273b306205c1cc15f33734be31e48c";
+pub const DATA_VERSION: usize = 11;
+
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("{0}")]
+    Invalid(String),
+    #[error("{0}")]
+    Io(#[from] std::io::Error),
+    #[error("{0}")]
+    Json(#[from] serde_json::Error),
+    #[error("{0}")]
+    Safetensors(#[from] safetensors::SafeTensorError),
+}
+pub type Result<T> = std::result::Result<T, Error>;
+pub(crate) fn ensure(condition: bool, message: impl Into<String>) -> Result<()> {
+    if condition {
+        Ok(())
+    } else {
+        Err(Error::Invalid(message.into()))
+    }
+}

@@ -1,0 +1,6 @@
+{
+  "count": 1,
+  "seed": 42,
+  "morphological_age_range": [20.0, 65.0],
+  "gender_range": [0.0, 1.0]
+}
