@@ -39,15 +39,29 @@ impl AssetStore {
     }
     pub fn converted(&self, name: &str) -> Result<Archive> {
         let path = self.root.join(format!("{name}.safetensors"));
-        if !path.is_file() {
-            return Err(Error::Invalid(format!("missing portable asset {}. Run tools/import_assets.py with the Python environment that runs upstream Anny",path.display())));
+        if path.is_file() {
+            Archive::load(path)
+        } else {
+            // A raw pinned upstream checkout is supported without a preparation
+            // interpreter. Prepared portable siblings remain the fast path.
+            crate::torch_archive::load(self.root.join(name))
         }
-        Archive::load(path)
     }
     fn json(&self, name: impl AsRef<Path>) -> Result<Value> {
-        Ok(serde_json::from_slice(&std::fs::read(
-            self.root.join(name),
-        )?)?)
+        let path = self.root.join(name);
+        if path.is_file() {
+            return Ok(serde_json::from_slice(&std::fs::read(path)?)?);
+        }
+        // The portable YAML sibling is optional for untouched upstream trees.
+        let original = path.with_extension("");
+        if matches!(
+            original.extension().and_then(|s| s.to_str()),
+            Some("yaml" | "yml")
+        ) {
+            return serde_yaml::from_slice(&std::fs::read(original)?)
+                .map_err(|e| Error::Invalid(format!("invalid asset YAML: {e}")));
+        }
+        Err(Error::Invalid(format!("missing asset {}", path.display())))
     }
     pub fn build_native(
         &self,

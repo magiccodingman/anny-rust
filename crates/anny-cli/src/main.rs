@@ -124,10 +124,13 @@ fn run() -> Result<()> {
     let mut args = std::env::args().skip(1);
     let command = args.next().unwrap_or_else(|| "help".into());
     if ["help", "--help", "-h"].contains(&command.as_str()) {
-        println!("anny <prepare|generate|inspect|compare|measure|sample|fit> [options]\n\nprepare --assets data [--config config.json] --output model.safetensors\ngenerate (--assets data | --model model.safetensors) [--config config.json]\n         [--params params.json] [--obj mesh.obj] [--output output.safetensors]\ninspect (--assets data | --model model.safetensors) [--config config.json]\ncompare --actual output.safetensors --expected reference.safetensors\n        [--atol 0.000001] [--rtol 0] [--report report.json]\n\nmeasure (--assets data | --model model.safetensors) [--params params.json]\nsample --assets data [--config config.json] [--options sample-options.json] --output params.json\nfit (--assets data | --model model.safetensors) --target target.safetensors\n    [--options fit-options.json] [--inverter-options inverter-options.json] --output fitted.json\n\nInputs, matrices, and output arrays are row-major. OBJ uses upstream Z-up meters.");
+        println!("anny <prepare|generate|inspect|compare|measure|sample|fit|import-upstream|verify-assets> [options]\n\nimport-upstream --source UPSTREAM_CHECKOUT --destination NEW_DIRECTORY\n                [--allow-revision-mismatch true]\nverify-assets --assets data\nprepare --assets data [--config config.json] --output model.safetensors\ngenerate (--assets data | --model model.safetensors) [--config config.json]\n         [--params params.json] [--obj mesh.obj] [--output output.safetensors]\ninspect (--assets data | --model model.safetensors) [--config config.json]\ncompare --actual output.safetensors --expected reference.safetensors\n        [--atol 0.000001] [--rtol 0] [--report report.json]\n\nmeasure (--assets data | --model model.safetensors) [--params params.json]\nsample --assets data [--config config.json] [--options sample-options.json] --output params.json\nfit (--assets data | --model model.safetensors) --target target.safetensors\n    [--options fit-options.json] [--inverter-options inverter-options.json] --output fitted.json\n\nInputs, matrices, and output arrays are row-major. OBJ uses upstream Z-up meters.");
         return Ok(());
     }
     let allowed: BTreeSet<_> = [
+        "source",
+        "destination",
+        "allow-revision-mismatch",
         "assets",
         "model",
         "config",
@@ -161,6 +164,32 @@ fn run() -> Result<()> {
         }
     }
     match command.as_str() {
+        "import-upstream" => {
+            let allow = opts
+                .get("allow-revision-mismatch")
+                .map(|s| s.parse::<bool>())
+                .transpose()
+                .map_err(|_| error("--allow-revision-mismatch expects true or false"))?
+                .unwrap_or(false);
+            let manifest = anny_core::import::import_upstream(
+                required(&opts, "source")?,
+                required(&opts, "destination")?,
+                allow,
+            )?;
+            println!(
+                "Imported and verified {} entries from {} without Python",
+                manifest.files.len(),
+                manifest.source_revision
+            );
+        }
+        "verify-assets" => {
+            let manifest = anny_core::import::verify(required(&opts, "assets")?)?;
+            println!(
+                "Verified {} entries; upstream {}",
+                manifest.files.len(),
+                manifest.source_revision
+            );
+        }
         "compare" => compare(&opts)?,
         "inspect" => {
             let m = model(&opts)?;

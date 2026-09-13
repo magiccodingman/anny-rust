@@ -6,7 +6,8 @@ This is a semantic native port, not a Python import-compatible package.
 ## Implemented and exercised against the real reference
 
 - Raw OBJ, target/target.gz, rig/weight JSON, face targets and segmentation loading.
-- One-time conversion of .pth/.pt and YAML assets; no Python execution at runtime.
+- Native restricted .pth/.pt decoding and YAML loading/conversion; no Python needed for import or runtime.
+  See `NATIVE_IMPORT.md` for supported serialization and limits.
 - ModelData Safetensors loading/saving, configuration stored in prepared models.
 - Six default / eleven all phenotype inputs, source anchors including age -1/3,
   ancestry-weight normalization/fallback, optional extrapolation, positive/negative

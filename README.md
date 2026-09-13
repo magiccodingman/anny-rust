@@ -1,5 +1,11 @@
 # anny-rust
 
+**The data payload is now included. No Python setup is needed to build or generate.**
+Native import from untouched upstream tensor archives is also available; see
+[Native import](docs/NATIVE_IMPORT.md). The older Python importer below is an
+optional developer/reference path, not a prerequisite for using this repository.
+
+
 A native Rust implementation of the Anny human-body geometry runtime, pinned to
 [NAVER Anny](https://github.com/naver/anny) revision
 `81ca83e202273b306205c1cc15f33734be31e48c` (ModelData schema 11).

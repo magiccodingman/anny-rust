@@ -4,6 +4,7 @@
 pub mod assets;
 pub mod config;
 pub mod distribution;
+pub mod import;
 pub mod inverter;
 pub mod math;
 pub mod mesh;
@@ -11,6 +12,7 @@ pub mod model;
 pub mod smpl;
 pub mod tensor;
 pub mod tools;
+pub mod torch_archive;
 
 pub use config::{AnnyConfig, PoseParameterization, SkinningMethod};
 pub use model::{Anny, ModelData, ModelOutput, Parameters};
