@@ -20,9 +20,9 @@ jobs:
           mkdir -p bundle/deps/src
           git archive --format=tar HEAD > bundle/source.tar
           git rev-parse HEAD > bundle/source-commit.txt
-          cp Cargo.toml bundle/workspace-manifest.txt
           printf 'fn main() {}\n' > bundle/deps/src/main.rs
           cat > bundle/deps/Cargo.toml <<'EOF'
+          [workspace]
           [package]
           name = "anny-extension-dependencies"
           version = "0.1.0"
@@ -33,7 +33,7 @@ jobs:
           base64 = "=0.22.1"
           EOF
           cd bundle/deps
-          cargo vendor ../vendor > config.toml
+          cargo vendor --versioned-dirs ../vendor > config.toml
           cd ../..
           tar -czf extension-inputs.tar.gz -C bundle .
       - uses: actions/upload-artifact@v4
