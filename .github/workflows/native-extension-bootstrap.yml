@@ -1,0 +1,20 @@
+# Temporary development snapshot; removed when the extension is published.
+name: Native extension bootstrap
+on:
+  push:
+    paths: [.github/workflows/native-extension-bootstrap.yml]
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Snapshot tracked source and assets
+        run: git archive --format=tar HEAD | gzip > /tmp/anny-extension-source.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-extension-source
+          path: /tmp/anny-extension-source.tar.gz
+          retention-days: 1
+          compression-level: 0
