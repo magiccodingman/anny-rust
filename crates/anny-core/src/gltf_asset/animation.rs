@@ -249,14 +249,50 @@ impl GltfAsset {
                     .ok_or_else(|| bad("animation sampler out of range"))?;
                 let input = index(sampler, "input")?;
                 let output = index(sampler, "output")?;
-                let input_meta = &self.graph.root["accessors"][input];
+                let accessors = self.graph.root["accessors"]
+                    .as_array()
+                    .ok_or_else(|| bad("animation accessors must be an array"))?;
+                let input_meta = accessors
+                    .get(input)
+                    .ok_or_else(|| bad("animation input accessor out of range"))?;
+                let output_meta = accessors
+                    .get(output)
+                    .ok_or_else(|| bad("animation output accessor out of range"))?;
+                let normalized = |a: &serde_json::Value| -> Result<bool> {
+                    a.get("normalized")
+                        .map(|v| {
+                            v.as_bool()
+                                .ok_or_else(|| bad("invalid accessor normalized flag"))
+                        })
+                        .transpose()
+                        .map(|v| v.unwrap_or(false))
+                };
                 ensure(
-                    input_meta["componentType"].as_u64() == Some(5126)
-                        && input_meta.get("min").is_some()
-                        && input_meta.get("max").is_some(),
-                    "animation input must be bounded float accessor",
+                    input_meta["componentType"].as_u64() == Some(5126) && !normalized(input_meta)?,
+                    "animation input must be an unnormalized float accessor",
+                )?;
+                // glTF 2.0 section 3.11: TRS translations/scales require FLOAT;
+                // rotations and morph weights also permit normalized 8/16-bit integers.
+                let component = output_meta["componentType"].as_u64();
+                let output_normalized = normalized(output_meta)?;
+                ensure(
+                    (component == Some(5126) && !output_normalized)
+                        || (matches!(path, AnimationPath::Rotation | AnimationPath::Weights)
+                            && matches!(component, Some(5120 | 5121 | 5122 | 5123))
+                            && output_normalized),
+                    "unsupported animation output component type/normalization",
                 )?;
                 let times = self.graph.accessor(input, 1)?;
+                for (bound, actual) in [("min", times.first()), ("max", times.last())] {
+                    let values = input_meta[bound]
+                        .as_array()
+                        .ok_or_else(|| bad("animation time accessor needs scalar min/max"))?;
+                    ensure(
+                        values.len() == 1
+                            && values[0].as_f64().map(|v| v as f32 as f64).as_ref() == actual,
+                        "animation time bounds must match the first and last keys",
+                    )?;
+                }
                 let width = match path {
                     AnimationPath::Rotation => 4,
                     AnimationPath::Weights => {
