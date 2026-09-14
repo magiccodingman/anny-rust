@@ -3,12 +3,12 @@
 Local validation against the pinned source, recorded September 13, 2026.
 
 - `cargo fmt --all -- --check`: passed.
-- `cargo test --workspace`: 16 tests passed (14 core, 2 C ABI).
+- `cargo test --workspace`: 96 tests passed, 0 failed (8 of them C ABI, including the pose-session equivalence tests); 15 data-dependent cases are `#[ignore]`d and were run separately against `data/`.
 - `cargo clippy --workspace --all-targets -- -D warnings`: passed.
-- `cargo check -p anny-wasm --target wasm32-unknown-unknown`: passed.
+- `cargo check -p anny-wasm --target wasm32-unknown-unknown`: passed, including the pose-session classes (browser execution was not re-run here).
 - Full-model Python-reference parity: **23/23 passed**, absolute tolerance 1e-6, relative tolerance 0. Integer arrays and labels are exact.
 - Prepared Safetensors model -> native reload -> reference comparison: passed.
-- Real C executable calling ABI 1 generated 13,718 vertices / 27,420 faces from imported assets.
+- Real C executables calling ABI 1 generated 13,718 vertices / 27,420 faces from imported assets, and pose sessions matched `evaluate` exactly (f64 and f32), including after the model handle was freed.
 - Native two-iteration fitting smoke completed on real default-mesh data; resulting mean vertex error 0.0082489114 m. This is a functional smoke, not optimizer trajectory parity or a convergence benchmark.
 - Native calibrated sampling read the original distributions and generated valid parameters from seed 42.
 

@@ -19,6 +19,15 @@ document.querySelector('#model').addEventListener('change', async event => {
         const vertices = output.tensor('vertices');
         const faces = model.indices('faces');
         result.textContent = `Vertices shape: ${Array.from(shape)}\nIndex entries: ${faces.length}\nFirst vertex: ${Array.from(vertices.slice(0,3))}\n\n${model.describe()}`;
+        // A pose session re-poses without re-evaluating the phenotype and rest model. It keeps
+        // its own reference to the model, so model.free() below does not disturb it, and every
+        // array it returns is an owned copy.
+        const session = model.poseSession(JSON.stringify({phenotype_kwargs:{height:0.6,weight:0.4}}));
+        session.update(JSON.stringify({root:[[1,0,0,0.2],[0,0.9396926,0.3420201,-0.15],[0,-0.3420201,0.9396926,0.05],[0,0,0,1]]}));
+        const posed = session.tensor('vertices');
+        const coefficients = session.coefficients();
+        result.textContent += `\n\nPose session: ${posed.length} posed vertices, ${coefficients.length} coefficients\nFirst posed vertex: ${Array.from(posed.slice(0,3))}`;
+        session.free();
         // vertices and faces are independent typed-array copies. They remain valid
         // after output/model.free(), and can be uploaded to a renderer by the host.
     } catch (error) { result.textContent = String(error); }

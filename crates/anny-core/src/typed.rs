@@ -525,6 +525,11 @@ impl PoseSessionF32<'_> {
     pub fn coefficients(&self) -> &TensorF32 {
         &self.coefficients
     }
+    /// The output of the most recent [`PoseSessionF32::update`], or the rest model if no pose has been
+    /// evaluated yet.
+    pub fn output(&self) -> &ModelOutputF32 {
+        &self.output
+    }
     /// Evaluate a pose against the cached rest model, reusing the previous output buffers.
     pub fn update(&mut self, pose: &Value) -> Result<&ModelOutputF32> {
         let output = std::mem::take(&mut self.output);

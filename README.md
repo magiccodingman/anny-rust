@@ -172,6 +172,8 @@ cc -std=c11 -Wall -Wextra -Werror -Iinclude examples/c_smoke.c \
 
 The C ABI uses opaque ownership/status/error handling and typed f64/f32 views. Shared serialized query operations expose measurements, keypoints, fitting/refinement, JVP/VJP, transforms and related secondary functionality.
 
+Re-posing the same character repeatedly is what `anny_session_new`/`anny_session_f32_new` are for: a session evaluates the phenotype, local changes, facial coefficients and the rest model once, and each `anny_session_update` then pays only for the pose. Sessions keep their own reference to the model, so the model handle may be freed first, and the views they return are invalidated only by the next update. `examples/c_smoke.c` asserts that a session's vertices equal `evaluate` exactly and that posing still works after the model handle is gone; `examples/c_float_smoke.c` does the same for the f32 ABI. Both are compiled and run by CI.
+
 The .NET 10 example wraps ownership with SafeHandle and exercises actual native calls:
 
 ```sh
@@ -181,11 +183,13 @@ LD_LIBRARY_PATH="$PWD/target/release${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
   "$PWD/output/anny-default.safetensors"
 ```
 
+`AnnyPoseSession` and `AnnySinglePrecisionPoseSession` are the managed session wrappers. They hold the managed model, so neither the managed nor the native model can be released while a session is alive, and the example asserts that the pose-only path agrees with `evaluate` exactly.
+
 This managed layer is **not yet the deferred full Unity Runtime/Editor package**.
 
 ## WebAssembly
 
-The core loads prepared model bytes in-memory and returns owned JS typed arrays.
+The core loads prepared model bytes in-memory and returns owned JS typed arrays. `AnnyModel.poseSession()` (and `AnnyModelF32.poseSession()`) returns a reusable `AnnySession` whose `update()` re-poses without re-evaluating the rest of the model; like the other wrappers it returns owned copies and keeps the model alive itself. The current browser example reports geometry and session output rather than rendering.
 
 ```sh
 rustup target add wasm32-unknown-unknown

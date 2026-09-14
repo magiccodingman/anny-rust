@@ -44,6 +44,9 @@ jobs:
           cc -std=c11 -Wall -Wextra -Werror -Iinclude examples/c_smoke.c \
             -Ltarget/release -lanny_capi -Wl,-rpath,"$PWD/target/release" -o output/c-smoke
           ./output/c-smoke data
+          cc -std=c11 -Wall -Wextra -Werror -Iinclude examples/c_float_smoke.c \
+            -Ltarget/release -lanny_capi -Wl,-rpath,"$PWD/target/release" -o output/c-float-smoke
+          ./output/c-float-smoke data
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'

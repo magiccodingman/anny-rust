@@ -1,13 +1,14 @@
 //! Browser wrapper. Supply prepared ModelData bytes; filesystem/asset construction
 //! and networking are deliberately left to the host, outside the browser runtime.
-use anny_core::{Anny, AnnyConfig, ModelOutput, Parameters, Tensor};
+use anny_core::{Anny, AnnyConfig, ModelOutput, Parameters, PoseSession, Tensor};
+use std::sync::Arc;
 use wasm_bindgen::prelude::*;
 fn js_error(e: impl std::fmt::Display) -> JsValue {
     JsValue::from_str(&e.to_string())
 }
 #[wasm_bindgen]
 pub struct AnnyModel {
-    model: Anny,
+    model: Arc<Anny>,
 }
 #[wasm_bindgen]
 pub struct AnnyResult {
@@ -23,7 +24,7 @@ impl AnnyModel {
             .transpose()
             .map_err(js_error)?;
         Ok(Self {
-            model: Anny::from_bytes(bytes, config).map_err(js_error)?,
+            model: Arc::new(Anny::from_bytes(bytes, config).map_err(js_error)?),
         })
     }
     /// Owned bytes suitable for a Blob download; no filesystem/server dependency.
@@ -59,8 +60,10 @@ impl AnnyModel {
             serde_json::from_str::<Vec<anny_core::transforms::Transform>>(operations_json)
                 .map_err(js_error)?;
         Ok(AnnyModel {
-            model: anny_core::transforms::apply_pipeline(&self.model, &operations)
-                .map_err(js_error)?,
+            model: Arc::new(
+                anny_core::transforms::apply_pipeline(&self.model, &operations)
+                    .map_err(js_error)?,
+            ),
         })
     }
     pub fn prepared_bytes(&self) -> Result<js_sys::Uint8Array, JsValue> {
@@ -146,12 +149,70 @@ fn indices(t: &Tensor) -> Result<js_sys::Uint32Array, JsValue> {
     Ok(js_sys::Uint32Array::from(values.as_slice()))
 }
 
+/// A reusable pose session: the coefficients and the rest model are evaluated once, so `update` pays
+/// only for the pose. It holds its own reference to the model, so the model object may be dropped.
+#[wasm_bindgen]
+pub struct AnnySession {
+    _model: Arc<Anny>,
+    session: PoseSession<'static>,
+}
+#[wasm_bindgen]
+impl AnnySession {
+    /// Re-pose the session. Arrays read before this call stay valid because they are copies.
+    pub fn update(&mut self, pose_json: Option<String>) -> Result<(), JsValue> {
+        let pose: serde_json::Value = pose_json
+            .as_deref()
+            .map(serde_json::from_str)
+            .transpose()
+            .map_err(js_error)?
+            .unwrap_or_default();
+        self.session.update(&pose).map_err(js_error)?;
+        Ok(())
+    }
+    /// Owned copy of one array of the current pose (the rest model before any `update`).
+    pub fn tensor(&self, name: &str) -> Result<js_sys::Float64Array, JsValue> {
+        Ok(js_sys::Float64Array::from(
+            self.session
+                .output()
+                .get(name)
+                .map_err(js_error)?
+                .data
+                .as_slice(),
+        ))
+    }
+    pub fn shape(&self, name: &str) -> Result<js_sys::Uint32Array, JsValue> {
+        shape(self.session.output().get(name).map_err(js_error)?)
+    }
+    /// Owned copy of the coefficients this session was created with.
+    pub fn coefficients(&self) -> js_sys::Float64Array {
+        js_sys::Float64Array::from(self.session.coefficients().data.as_slice())
+    }
+}
+
 pub mod single;
 #[wasm_bindgen]
 impl AnnyModel {
+    /// Start a reusable pose session for repeated re-posing with fixed non-pose parameters.
+    #[wasm_bindgen(js_name = poseSession)]
+    pub fn pose_session(&self, parameters_json: Option<String>) -> Result<AnnySession, JsValue> {
+        let parameters: Parameters = parameters_json
+            .as_deref()
+            .map(serde_json::from_str)
+            .transpose()
+            .map_err(js_error)?
+            .unwrap_or_default();
+        let owner = Arc::clone(&self.model);
+        // `owner` keeps the model alive for as long as the session borrows it, and a model is
+        // immutable after construction, so widening the borrow to 'static here is sound.
+        let model_ref: &'static Anny = unsafe { &*Arc::as_ptr(&owner) };
+        Ok(AnnySession {
+            _model: owner,
+            session: model_ref.pose_session(&parameters).map_err(js_error)?,
+        })
+    }
     pub fn to_f32(&self) -> Result<single::AnnyModelF32, JsValue> {
         Ok(single::AnnyModelF32 {
-            model: self.model.to_f32().map_err(js_error)?,
+            model: Arc::new(self.model.to_f32().map_err(js_error)?),
         })
     }
 }

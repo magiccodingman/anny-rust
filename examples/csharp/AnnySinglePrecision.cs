@@ -36,6 +36,19 @@ public sealed class AnnySinglePrecisionModel : IDisposable
             return new AnnyMeshF32(Copy(vertices), indices, width);
         }
     }
+    /// <summary>
+    /// Starts a reusable f32 pose session; see <see cref="AnnyPoseSession"/> for the ownership rules.
+    /// </summary>
+    public AnnySinglePrecisionPoseSession CreateSession(string parametersJson = "{}")
+    {
+        lock (gate)
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            Check(NativeF32.SessionNew(model, parametersJson, out var pointer));
+            return new AnnySinglePrecisionPoseSession(this, new SessionHandleF32(pointer));
+        }
+    }
+
     public byte[] SavePrepared()
     {
         lock (gate)
@@ -49,14 +62,14 @@ public sealed class AnnySinglePrecisionModel : IDisposable
             return result;
         }
     }
-    private static float[] Copy(TensorView view)
+    internal static float[] Copy(TensorView view)
     {
         int count = checked((int)view.Length);
         var result = new float[count];
         if (count != 0) Marshal.Copy(view.Data, result, 0, count);
         return result;
     }
-    private static void Check(int status)
+    internal static void Check(int status)
     {
         if (status != 0) throw new InvalidOperationException(Marshal.PtrToStringUTF8(Native.LastError()) ?? "Native f32 error.");
     }
@@ -70,6 +83,67 @@ public sealed class AnnySinglePrecisionModel : IDisposable
         }
     }
 }
+/// <summary>Owns one native f32 pose session; keeps its model alive. Not thread safe.</summary>
+public sealed class AnnySinglePrecisionPoseSession : IDisposable
+{
+    private readonly AnnySinglePrecisionModel owner;
+    private readonly SessionHandleF32 session;
+    private readonly object gate = new();
+    private bool disposed;
+
+    internal AnnySinglePrecisionPoseSession(AnnySinglePrecisionModel owner, SessionHandleF32 session)
+    {
+        this.owner = owner;
+        this.session = session;
+    }
+
+    public void Update(string poseJson = "{}")
+    {
+        lock (gate)
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            AnnySinglePrecisionModel.Check(NativeF32.SessionUpdate(session, poseJson));
+        }
+    }
+
+    public float[] Tensor(string name)
+    {
+        lock (gate)
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            AnnySinglePrecisionModel.Check(NativeF32.SessionTensor(session, name, out var view));
+            return AnnySinglePrecisionModel.Copy(view);
+        }
+    }
+
+    public float[] Coefficients()
+    {
+        lock (gate)
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            AnnySinglePrecisionModel.Check(NativeF32.SessionCoefficients(session, out var view));
+            return AnnySinglePrecisionModel.Copy(view);
+        }
+    }
+
+    public void Dispose()
+    {
+        lock (gate)
+        {
+            if (disposed) return;
+            disposed = true;
+            session.Dispose();
+        }
+    }
+}
+
+internal sealed class SessionHandleF32 : SafeHandle
+{
+    internal SessionHandleF32(IntPtr value) : base(IntPtr.Zero, true) => SetHandle(value);
+    public override bool IsInvalid => handle == IntPtr.Zero;
+    protected override bool ReleaseHandle() { NativeF32.FreeSession(handle); return true; }
+}
+
 internal sealed class ModelHandleF32 : SafeHandle
 {
     internal ModelHandleF32(IntPtr value) : base(IntPtr.Zero, true) => SetHandle(value);
@@ -101,4 +175,14 @@ internal static class NativeF32
     internal static extern void FreeModel(IntPtr model);
     [DllImport(Library, EntryPoint="anny_output_f32_free", CallingConvention=CallingConvention.Cdecl)]
     internal static extern void FreeOutput(IntPtr output);
+    [DllImport(Library, EntryPoint="anny_session_f32_new", CallingConvention=CallingConvention.Cdecl)]
+    internal static extern int SessionNew(ModelHandleF32 model, [MarshalAs(UnmanagedType.LPUTF8Str)] string parameters, out IntPtr session);
+    [DllImport(Library, EntryPoint="anny_session_f32_update", CallingConvention=CallingConvention.Cdecl)]
+    internal static extern int SessionUpdate(SessionHandleF32 session, [MarshalAs(UnmanagedType.LPUTF8Str)] string pose);
+    [DllImport(Library, EntryPoint="anny_session_f32_tensor", CallingConvention=CallingConvention.Cdecl)]
+    internal static extern int SessionTensor(SessionHandleF32 session, [MarshalAs(UnmanagedType.LPUTF8Str)] string name, out TensorView view);
+    [DllImport(Library, EntryPoint="anny_session_f32_coefficients", CallingConvention=CallingConvention.Cdecl)]
+    internal static extern int SessionCoefficients(SessionHandleF32 session, out TensorView view);
+    [DllImport(Library, EntryPoint="anny_session_f32_free", CallingConvention=CallingConvention.Cdecl)]
+    internal static extern void FreeSession(IntPtr session);
 }

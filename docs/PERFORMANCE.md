@@ -228,7 +228,12 @@ having — it is cheap to build (0.349 ms, so it pays for itself in one or two u
 right API shape for animation and editor sliders, and it avoids re-deriving the rest model — but it
 is a 1.5-2x optimization, not a 32x one. Both `Anny::pose_session` and `AnnyF32::pose_session` exist
 and are exact-equivalence tested (`max difference 0e0` against `forward` on real data over 8 poses,
-all five pose conventions, plus bit-identical f32).
+all five pose conventions, plus bit-identical f32). They were reachable only from Rust until the
+bindings caught up: `anny_session_*` covers the C ABI in both dtypes, `AnnyPoseSession` covers C#, and
+`AnnyModel.poseSession()`/`AnnySession` covers WASM, each keeping a reference to its model so the
+model handle or object may be released first. The C and .NET examples now assert that a session's
+vertices equal `evaluate` exactly (not merely that the session is faster), which is the property a
+caller actually depends on.
 
 **4. Collision was the single biggest outlier by an order of magnitude, and is now 2.2x cheaper.**
 `derive collision` cost 60.6 ms — ~100x a full generation of the same character. The split was

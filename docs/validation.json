@@ -175,7 +175,7 @@
     "rust": "1.90.0"
   },
   "cache_reload_passed": true,
-  "c_abi_smoke": "ABI 1: 13718 vertices, 27420 faces",
+  "c_abi_smoke": "ABI 1: 13718 vertices, 27420 faces; pose sessions match evaluate exactly (f64+f32) and survive anny_model_free",
   "wasm_compilation_passed": true,
   "browser_execution_tested": false,
   "real_smpl_assets_tested": false
