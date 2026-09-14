@@ -17,7 +17,7 @@ use anny_core::{
     math::write4,
     model::identity_poses,
     operations::{execute, Request},
-    Result,
+    Parameters, Result,
 };
 use std::hint::black_box;
 use std::path::PathBuf;
@@ -78,6 +78,32 @@ fn batch_poses(batch: usize, bones: usize) -> anny_core::Tensor {
         }
     }
     pose
+}
+
+/// One character, a different pose every call: the animating/editor-slider workload. The pose has to
+/// change or the compiler could hoist the update out of the measurement loop.
+fn editor_pose(bones: usize, tick: u32) -> serde_json::Value {
+    let mut pose = identity_poses(1, bones);
+    let phase = tick as f64 * 0.05;
+    write4(
+        &anny_core::math::rigid(
+            &anny_core::math::rotvec(&anny_core::math::Vec3::new(0.0, phase, 0.0)),
+            &anny_core::math::Vec3::new(0.0, 0.0, 0.0),
+        ),
+        &mut pose.data[..16],
+    );
+    write4(
+        &anny_core::math::rigid(
+            &anny_core::math::rotvec(&anny_core::math::Vec3::new(
+                phase * 0.5,
+                -phase * 0.25,
+                phase * 0.75,
+            )),
+            &Default::default(),
+        ),
+        &mut pose.data[16..32],
+    );
+    pose.nested_json()
 }
 
 fn main() -> Result<()> {
@@ -214,6 +240,41 @@ fn main() -> Result<()> {
             stats.min.as_secs_f64() * 1e6 / batch as f64
         );
     }
+
+    // Where the fixed per-call cost actually goes. `forward` is coefficients + rest model + pose
+    // model; the first two do not depend on the pose, so a pose session caches them. Measuring the
+    // three steps separately is what makes the session claim falsifiable rather than asserted.
+    let coefficients = prepared.coefficients(&Parameters::default())?;
+    let stats = measure(20, 3, || {
+        black_box(prepared.coefficients(&Parameters::default())?);
+        Ok(())
+    })?;
+    report("split", "coefficients default", 20, &stats);
+
+    let stats = measure(20, 3, || {
+        black_box(prepared.rest_model(&coefficients)?);
+        Ok(())
+    })?;
+    report("split", "rest_model default", 20, &stats);
+
+    // The repeated-update path: one session, a fresh pose every iteration. This is the animating
+    // character / editor slider case, and the pose differs each time so it cannot be hoisted.
+    let mut session = prepared.pose_session(&Parameters::default())?;
+    let mut tick = 0u32;
+    let stats = measure(50, 3, || {
+        tick += 1;
+        black_box(session.update(&editor_pose(bones, tick))?);
+        Ok(())
+    })?;
+    report("session", "update pose (reused rest)", 50, &stats);
+
+    // Building the session is not free, so it has to be shown next to the per-update cost: the
+    // break-even point is what decides whether a caller should use a session at all.
+    let stats = measure(10, 2, || {
+        black_box(prepared.pose_session(&Parameters::default())?);
+        Ok(())
+    })?;
+    report("session", "build (coefficients + rest)", 10, &stats);
 
     // Secondary operations through the shared control-plane API.
     let regressor = anny_core::tools::KeypointsRegressor::coco(&store, &prepared, None)?;

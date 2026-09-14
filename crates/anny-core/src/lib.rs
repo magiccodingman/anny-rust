@@ -18,7 +18,7 @@ pub mod tools;
 pub mod torch_archive;
 
 pub use config::{AnnyConfig, PoseParameterization, SkinningMethod};
-pub use model::{Anny, ModelData, ModelOutput, Parameters};
+pub use model::{Anny, ModelData, ModelOutput, Parameters, PoseSession};
 pub use tensor::Tensor;
 pub const UPSTREAM_REVISION: &str = "81ca83e202273b306205c1cc15f33734be31e48c";
 pub const DATA_VERSION: usize = 11;

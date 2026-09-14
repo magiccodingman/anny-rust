@@ -346,6 +346,80 @@ impl Anny {
     ) -> Result<Tensor> {
         pose_parameters(&self.data, output, mode)
     }
+    /// Build a reusable pose-only evaluation context for a fixed parameter set.
+    ///
+    /// The phenotype/local-change/facial coefficients and the rest model both depend on the
+    /// parameters but not on the pose, and [`Anny::forward`] rebuilds both on every call. A session
+    /// evaluates them once, so [`PoseSession::update`] pays only for the pose-dependent half. Use
+    /// this for animation, re-posing and editor sliders, where the pose changes and the rest of the
+    /// parameters do not.
+    ///
+    /// The session fixes the pose parameterization, skinning method and bone-end setting taken from
+    /// these parameters and the model config. Changing any of those, or the phenotype/local-change/
+    /// facial selections, requires a new session; [`Anny::forward`] remains the general path.
+    pub fn pose_session(&self, p: &Parameters) -> Result<PoseSession<'_>> {
+        let coefficients = self.coefficients(p)?;
+        let output = rest_model(&self.data, &self.rig, &coefficients)?;
+        Ok(PoseSession {
+            model: self,
+            coefficients,
+            output,
+            pose_parameterization: p
+                .pose_parameterization
+                .unwrap_or(self.config.pose_parameterization),
+            skinning: self.config.skinning_method,
+            return_bone_ends: p.return_bone_ends,
+        })
+    }
+}
+
+/// A reusable pose-only evaluation context; see [`Anny::pose_session`].
+///
+/// The result of [`PoseSession::update`] is the same [`ModelOutput`] shape [`Anny::forward`] returns,
+/// including the shared rest arrays, and is numerically identical to the corresponding
+/// `forward` call for the same parameters.
+pub struct PoseSession<'a> {
+    model: &'a Anny,
+    coefficients: Tensor,
+    output: ModelOutput,
+    pose_parameterization: PoseParameterization,
+    skinning: SkinningMethod,
+    return_bone_ends: bool,
+}
+impl PoseSession<'_> {
+    /// The phenotype/local-change/facial coefficients this session was built with.
+    pub fn coefficients(&self) -> &Tensor {
+        &self.coefficients
+    }
+    /// Evaluate a pose against the cached rest model, reusing the previous output buffers.
+    pub fn update(&mut self, pose: &Value) -> Result<&ModelOutput> {
+        let output = std::mem::take(&mut self.output);
+        match pose_model(
+            &self.model.data,
+            &self.model.rig,
+            output,
+            pose,
+            self.pose_parameterization,
+            self.skinning,
+            self.return_bone_ends,
+        ) {
+            Ok(output) => {
+                self.output = output;
+                Ok(&self.output)
+            }
+            Err(e) => {
+                // `pose_model` consumed the output it was handed, and the rest arrays live in it, so
+                // a bad pose has to leave a rebuilt rest model behind to keep the session usable.
+                // This is the error path only; the rest model is a pure function of the
+                // coefficients, so the rebuild is deterministic.
+                if let Ok(rest) = rest_model(&self.model.data, &self.model.rig, &self.coefficients)
+                {
+                    self.output = rest;
+                }
+                Err(e)
+            }
+        }
+    }
 }
 
 type Scalar = f64;

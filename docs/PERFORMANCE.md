@@ -51,9 +51,45 @@ evaluated through the typed API, not f64 evaluation with a cast on the output.
 100 characters cost 36.3 ms, one costs 9.5 ms. The marginal cost is ~0.36 ms/character, so about
 **9.1 ms of every single-character call is fixed overhead**. This is the pose-only/animation case —
 the most common runtime case in a game or an editor slider — and it currently pays for a full
-rest-model rebuild that the pose did not change. Reusing the rest model across pose-only updates is
-therefore the highest-value optimization in the project: it targets roughly a 20x reduction on the
-animating path. Ranked first for that reason, and not yet implemented.
+rest-model rebuild that the pose did not change. This was the highest-value optimization in the
+project and is now **implemented and measured** (see "Pose-only update" below): the update path is
+**0.281 ms** against 9.021 ms for a full call.
+
+## Pose-only update (`Anny::pose_session`)
+
+`forward` is `coefficients` + `rest_model` + `pose_model`. Only the last depends on the pose, so the
+first two are cacheable. Measuring them separately was necessary to avoid optimizing the wrong step —
+and it did not go the way the earlier guess assumed:
+
+| step | min | median | share of a full call |
+|---|---|---|---|
+| `generate f64 default` (whole call) | 9.021 ms | 9.440 ms | 100% |
+| `split coefficients default` | 0.013 ms | 0.013 ms | 0.1% |
+| `split rest_model default` | 8.421 ms | 8.593 ms | 93.3% |
+| `session build (coefficients + rest)` | 8.551 ms | 8.753 ms | — |
+| `session update pose (reused rest)` | **0.281 ms** | **0.288 ms** | **3.1%** |
+
+So the fixed 9.1 ms is **the rest model, not coefficients and not allocation**: coefficients are 0.1%
+of the call, which is two orders of magnitude below the earlier "per-call allocations behind the
+9.1 ms" hypothesis. That hypothesis was wrong and is corrected here.
+
+**Measured result: 0.281 ms per pose update against 9.021 ms per full call — a 32x reduction, 8.74 ms
+saved per update.** Building a session costs 8.551 ms, so it breaks even after **one** update; every
+further pose costs 0.281 ms. At 0.281 ms an update runs ~3,500 times per second single-threaded,
+which is not the bottleneck for a 60 Hz editor or animation loop.
+
+Equivalence is asserted, not assumed: `crates/anny-core/tests/pose_session.rs` compares
+`session.update(pose)` against `forward` for the same parameters across all five pose
+parameterizations, batch sizes (including changing the batch size between updates), the
+`return_bone_ends` setting, and after a rejected pose, and requires **exact** equality (max difference
+`0.0`), because the session runs the same code on the same coefficients and a tolerance would hide a
+real divergence. On the committed 13,718-vertex / 104-bone model over 8 poses the maximum difference
+is likewise `0e0`.
+
+The f64 path is done. **`AnnyF32` still has no session**, so the typed path games and the Unity/WASM
+surfaces would actually use still pays the full 8 ms per pose update. That is the next step, and it is
+mechanical: `AnnyF32::rest_model`/`forward` already call the same generic kernels.
+
 
 **2. The prepared payload is large and slow to load.** 104.1 MB and ~307 ms. That is larger than the
 committed source data because the prepared form materializes blendshape deltas for the full model.
@@ -79,11 +115,14 @@ path, and the prepared payload is what runtimes should load.
 
 Ordered by expected value per unit of risk, with correctness preserved throughout:
 
-1. **Pose-only/incremental update** — reuse the rest model when phenotypes and local changes are
-   unchanged. Largest measured win available (see finding 1).
-2. **Reusable workspace / allocation reduction** — the per-call allocations behind the 9.1 ms fixed
-   cost, plus the per-vertex closures in the skinning loop.
-3. **Prepared-model loading** — profile the 307 ms/104 MB load; consider mmap/zero-copy.
+1. ~~**Pose-only/incremental update**~~ — **DONE** for `Anny` (0.281 ms vs 9.021 ms, 32x). Still to do
+   for `AnnyF32`. This also redirected the plan: since `rest_model` is 93% of the fixed cost and
+   coefficients are 0.1%, making `rest_model` itself faster is now the whole ballgame for the
+   general path, not allocation hygiene.
+2. **`rest_model` kernel cost** — the 8.42 ms step. It is blendshape accumulation plus bone-orientation
+   propagation over 104 bones and 13,718 vertices; SIMD and better memory layout apply directly here,
+   and it no longer has to be guessed at, only profiled.
+3. **Prepared-model loading** — profile the 293–307 ms/104 MB load; consider mmap/zero-copy.
 4. **SIMD in the skinning and blendshape accumulation kernels** — now measurable against the rows
    above, with the scalar path staying the correctness reference.
 5. **GPU/WebGPU evaluation** — targets the batched path (`x100` at 36.3 ms = 0.36 ms/character) and
@@ -94,6 +133,8 @@ the f32 and f64 paths are both semantically load-bearing and neither may regress
 
 ## Status
 
-This document records a **baseline only**. GPU/WebGPU, SIMD and the broader profiling/optimization
-work have not been started, and no row above is a real-time performance guarantee. Rows are added or
-revised only with measured numbers from the harness on the configuration described above.
+This document records a **baseline plus the first optimized path**. The pose-only update for `Anny` is
+implemented and measured (32x on the repeated-pose path, exact-equivalence tested). GPU/WebGPU, SIMD
+and the broader profiling/optimization work have not been started, and no row above is a real-time
+performance guarantee. Rows are added or revised only with measured numbers from the harness on the
+configuration described above.
