@@ -1,3 +1,4 @@
+# Qualification checkpoint after animation Clippy fix.
 name: Native v1 qualification
 on:
   push:
