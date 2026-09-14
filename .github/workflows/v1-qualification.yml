@@ -26,8 +26,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: npm
-          cache-dependency-path: examples/qualification/package-lock.json
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
@@ -91,7 +89,7 @@ jobs:
           wasm-bindgen --target web --out-dir examples/browser/pkg target/wasm32-unknown-unknown/release/anny_wasm.wasm
       - name: Install browser/validator qualification dependencies
         working-directory: examples/qualification
-        run: npm ci
+        run: npm install --no-save
       - name: Install Playwright Chromium
         working-directory: examples/qualification
         run: npx playwright install --with-deps chromium
