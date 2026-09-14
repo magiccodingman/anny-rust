@@ -1,0 +1,24 @@
+anny-rust
+Native implementation derived from NAVER Anny.
+
+Anny
+Copyright (C) 2025 NAVER Corp.
+Licensed under the Apache License, Version 2.0.
+Reference revision: 81ca83e202273b306205c1cc15f33734be31e48c
+Source: https://github.com/naver/anny
+The Rust implementation changes the language, packaging, storage and runtime.
+The original Anny authors do not endorse this independent port.
+
+NVIDIA Warp
+Copyright (c) 2022 NVIDIA CORPORATION. All rights reserved.
+Licensed under the Apache License, Version 2.0.
+CPU closest-point/SAH BVH compatibility routines in crates/anny-core/src/mesh.rs
+adapt algorithms from Warp 1.9.1, native/intersect.h, native/mesh.h and native/bvh.cpp.
+Source: https://github.com/NVIDIA/warp
+
+Imported model assets retain their own license files and attribution.
+MPFB2/MakeHuman and Face Units assets: accompanying CC0 notices.
+SOMA-derived data: accompanying Apache-2.0 notices.
+SMPL/SMPL-X assets and correspondence maps: separate terms; not included here.
+
+Third-party Rust dependencies retain their respective package licenses.

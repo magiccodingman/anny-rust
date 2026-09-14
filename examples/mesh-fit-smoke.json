@@ -1,0 +1,10 @@
+{
+  "outer_iterations":1,
+  "inner_iterations":1,
+  "initial":{
+    "initial_phenotype_kwargs":{"age":0.5},
+    "optimize_phenotypes":false,
+    "max_n_iters":1
+  },
+  "inverter":{"n_points":1024,"joint_top_k":1024}
+}

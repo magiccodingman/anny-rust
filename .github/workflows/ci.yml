@@ -1,0 +1,105 @@
+name: Rust validation
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      parity:
+        description: 'Build and compare all 23 Python reference cases'
+        type: boolean
+        default: false
+      native_authoring:
+        description: 'Regenerate native orientation and skin-weight references'
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: anny-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.90.0
+        with:
+          targets: wasm32-unknown-unknown
+          components: rustfmt, clippy
+      - run: cargo fmt --all -- --check
+      - run: cargo test --workspace --locked
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo check -p anny-wasm --target wasm32-unknown-unknown --locked
+      - run: cargo build --workspace --release --locked
+      - name: Verify committed native asset payload
+        run: |
+          ./target/release/anny verify-assets --assets data
+          cargo test -p anny-core --release --locked --test native_import -- --ignored --nocapture
+      - name: Prepare model and run C ABI lifecycle
+        shell: bash
+        run: |
+          mkdir -p output
+          ./target/release/anny prepare --assets data --output output/ci-model.safetensors
+          cc -std=c11 -Wall -Wextra -Werror -Iinclude examples/c_smoke.c \
+            -Ltarget/release -lanny_capi -Wl,-rpath,"$PWD/target/release" -o output/c-smoke
+          ./output/c-smoke data
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet build examples/csharp --configuration Release
+      - name: Run C# native lifecycle, not just a binding compile
+        shell: bash
+        run: |
+          export LD_LIBRARY_PATH="$PWD/target/release:${LD_LIBRARY_PATH:-}"
+          dotnet run --project examples/csharp --configuration Release --no-build -- "$PWD/output/ci-model.safetensors"
+      - name: Regenerate native authoring references (opt-in)
+        if: github.event_name == 'workflow_dispatch' && inputs.native_authoring
+        run: cargo test -p anny-core --release --locked --test authoring -- --ignored --nocapture --test-threads=1
+  portable:
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.90.0
+      - run: cargo test --workspace --locked
+  parity:
+    if: github.event_name == 'workflow_dispatch' && inputs.parity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: naver/anny
+          ref: 81ca83e202273b306205c1cc15f33734be31e48c
+          path: .upstream
+      - uses: dtolnay/rust-toolchain@1.90.0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install reference-only Python dependencies
+        run: |
+          python -m pip install torch==2.10.0 --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install roma==1.6.1 safetensors==0.7.0 warp-lang==1.9.1 pyyaml pillow numpy trimesh requests
+          python -m pip install --no-deps ./.upstream
+      - run: cargo build -p anny-cli --release --locked
+      - run: python tools/import_assets.py --source .upstream --destination output/data
+      - name: Generate Python fixtures
+        env:
+          ANNY_CACHE_DIR: ${{ github.workspace }}/output/reference-cache
+          PYTHONPATH: ${{ github.workspace }}/.upstream/src
+          OMP_NUM_THREADS: '2'
+        run: python tools/export_reference.py --output output/fixtures --cases all-cases
+      - name: Compare native output
+        run: python tools/check_parity.py --assets output/data --fixtures output/fixtures --summary output/parity-summary.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: parity-results
+          path: |
+            output/parity-summary.json
+            output/fixtures/*/comparison.json
+            output/fixtures/*/native.log
+          retention-days: 7
