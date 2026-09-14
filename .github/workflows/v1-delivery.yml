@@ -1,0 +1,58 @@
+# Temporary source delivery; removed before the PR handoff.
+name: Native completeness delivery
+on:
+  push:
+    branches: [codex/native-v1-completion]
+    paths: [.github/v1-delivery/ready.json]
+permissions:
+  contents: write
+jobs:
+  deliver:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: dtolnay/rust-toolchain@1.90.0
+        with:
+          targets: wasm32-unknown-unknown
+          components: rustfmt, clippy
+      - name: Apply exact checksummed native source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/codex/native-v1-completion
+          while IFS= read -r part; do
+            [[ "$part" =~ ^[0-9]+\.b64$ ]] || exit 1
+            cat ".github/v1-delivery/$part"
+          done < <(jq -r '.parts[]' .github/v1-delivery/ready.json) | base64 --decode | gzip --decompress > "$RUNNER_TEMP/native.patch"
+          expected=$(jq -r .sha256 .github/v1-delivery/ready.json)
+          test "$(sha256sum "$RUNNER_TEMP/native.patch" | cut -d' ' -f1)" = "$expected"
+          git apply --check "$RUNNER_TEMP/native.patch"
+          git apply "$RUNNER_TEMP/native.patch"
+      - name: Validate native runtime and real interfaces
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --all -- --check
+          rustfmt --edition 2021 --check crates/anny-core/src/runtime/math.rs crates/anny-core/src/runtime/evaluate.rs
+          cargo test --workspace --locked
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+          cargo check -p anny-wasm --target wasm32-unknown-unknown --locked
+          cargo build --workspace --release --locked
+          mkdir -p output
+          cc -std=c11 -Wall -Wextra -Werror -Iinclude examples/c_float_smoke.c -Ltarget/release -lanny_capi -lm -Wl,-rpath,"$PWD/target/release" -o output/c-float-smoke
+          ./output/c-float-smoke data
+          ./target/release/anny motion --assets data --source examples/motion.json --fps 6 --precision f32 --output output/motion32.glb
+      - name: Publish tested source on the requested branch only
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add -- Cargo.toml Cargo.lock README.md crates docs examples include
+          if git diff --cached --name-only | grep -E '^(data/|tools/|\.github/)'; then exit 1; fi
+          test "$(git ls-remote origin refs/heads/codex/native-v1-completion | cut -f1)" = "$GITHUB_SHA"
+          git config user.name 'Anny Rust port'
+          git config user.email '131926685+magiccodingman@users.noreply.github.com'
+          git commit -m "Add true typed f32 runtime, native pose clips and landmark fitting initialization"
+          git push origin HEAD:refs/heads/codex/native-v1-completion
+          git rev-parse HEAD
