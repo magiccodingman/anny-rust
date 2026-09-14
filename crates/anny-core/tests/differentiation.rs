@@ -111,7 +111,7 @@ fn analytic_directions_match_finite_differences_for_pose_shape_and_skinning() {
                 );
                 let mut cov = Tensor::zeros(vec![4, 2, 3, 3]);
                 cov.data[2 * 18 + 1] = 0.15;
-                cov.data[1 * 18 + 9 + 3] = -0.25;
+                cov.data[18 + 9 + 3] = -0.25;
                 m.data.put("bone_orientation_blendshapes", cov);
             }
             let m = Anny::from_model_data(m.data, m.config).unwrap();

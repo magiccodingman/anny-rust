@@ -3,6 +3,9 @@
 //! Directions use named scalar controls and left-trivialized bone rotation
 //! increments (radians), with independent additive translations (meters).
 mod pairs;
+mod reverse;
+pub use reverse::{vjp, ParameterSelection};
+
 use crate::{
     config::{BoneOrientation, PHENOTYPE_VARIATIONS},
     ensure,
@@ -176,12 +179,13 @@ fn vectors(value: &Tensor, derivative: &Tensor) -> Vec<V> {
         })
         .collect()
 }
+type RestDifferential = (Vec<V>, Vec<H>, Option<Vec<V>>);
 fn rest_differential(
     m: &Anny,
     coefficients: &Tensor,
     dc: &Tensor,
     base: &ModelOutput,
-) -> Result<(Vec<V>, Vec<H>, Option<Vec<V>>)> {
+) -> Result<RestDifferential> {
     let rig = m.resolved_rig();
     let j = m.data.bone_count();
     let vertices = vectors(
@@ -214,8 +218,8 @@ fn rest_differential(
                 coefficients,
             )?;
             let da = blend_direction(m, "bone_orientation_blendshapes", dc)?;
-            for i in 0..j {
-                orientations[i] = procrustes(M {
+            for (i, orientation) in orientations.iter_mut().enumerate() {
+                *orientation = procrustes(M {
                     v: mat3(&a.data[i * 9..i * 9 + 9]),
                     d: mat3(&da.data[i * 9..i * 9 + 9]),
                 })?;
