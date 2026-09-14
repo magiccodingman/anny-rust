@@ -60,3 +60,5 @@ pub mod numpy;
 pub mod prior;
 
 pub mod refinement;
+
+pub mod gltf_asset;
