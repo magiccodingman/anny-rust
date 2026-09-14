@@ -14,6 +14,13 @@ use serde_json::{json, Value};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Request {
+    MotionResample {
+        clip: crate::motion::PoseClip,
+        fps: f64,
+    },
+    AlignLandmarks {
+        landmarks: crate::fitting::Landmarks,
+    },
     Measure {
         #[serde(default)]
         parameters: Parameters,
@@ -66,6 +73,10 @@ fn yes() -> bool {
 }
 pub fn execute(model: &Anny, request: &Request) -> Result<Value> {
     match request {
+        Request::MotionResample { clip, fps } => {
+            Ok(serde_json::to_value(clip.resample(model, *fps)?)?)
+        }
+        Request::AlignLandmarks { landmarks } => Ok(serde_json::to_value(landmarks.align()?)?),
         Request::Measure { parameters } => {
             let result = model.forward(parameters)?;
             Ok(serde_json::to_value(

@@ -1,0 +1,84 @@
+{
+  "default": {},
+  "all": {
+    "phenotypes": "all",
+    "local_changes": "all",
+    "facial_actions": "all"
+  },
+  "dqs": {
+    "skinning_method": "dqs",
+    "local_changes": "default",
+    "facial_actions": "all"
+  },
+  "makehuman": {
+    "rig": "makehuman",
+    "phenotypes": "all",
+    "local_changes": "default"
+  },
+  "game_engine": {
+    "rig": "game_engine"
+  },
+  "mixamo": {
+    "rig": "mixamo"
+  },
+  "cmu_mb": {
+    "rig": "cmu_mb"
+  },
+  "quads": {
+    "topology": "anny-quads"
+  },
+  "hand_left": {
+    "rig": "anny-hand.L",
+    "topology": "hand.L"
+  },
+  "hand_right": {
+    "rig": "anny-hand.R",
+    "topology": "hand.R"
+  },
+  "head": {
+    "rig": "makehuman-head",
+    "topology": "head",
+    "facial_actions": "all"
+  },
+  "procrustes": {
+    "rig": "makehuman-procrustes",
+    "local_changes": "default"
+  },
+  "pruned": {
+    "rig": "anny-notoes-nohands"
+  },
+  "extrapolate": {
+    "extrapolate_phenotypes": true,
+    "phenotypes": "all"
+  },
+  "world": {
+    "pose_parameterization": "world"
+  },
+  "world_orient": {
+    "pose_parameterization": "world-orient"
+  },
+  "local_bone": {
+    "pose_parameterization": "local-bone"
+  },
+  "local_bone_world": {
+    "pose_parameterization": "local-bone-world"
+  },
+  "notoes": {
+    "topology": "notoes"
+  },
+  "soma_topology": {
+    "topology": "soma"
+  },
+  "soma": {
+    "rig": "soma",
+    "topology": "soma"
+  },
+  "soma_anny": {
+    "rig": "soma",
+    "topology": "anny"
+  },
+  "batch": {
+    "local_changes": "default",
+    "facial_actions": "all"
+  }
+}

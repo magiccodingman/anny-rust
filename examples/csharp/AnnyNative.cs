@@ -37,6 +37,17 @@ public sealed class AnnyModel : IDisposable
         }
     }
 
+    /// <summary>Copies static data once into an independent f32 native runtime.</summary>
+    public AnnySinglePrecisionModel ToSinglePrecision()
+    {
+        lock (gate)
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            Check(NativeF32.Convert(model, out var pointer));
+            return new AnnySinglePrecisionModel(pointer);
+        }
+    }
+
     public AnnyMesh Generate(string parametersJson = "{}")
     {
         lock (gate)

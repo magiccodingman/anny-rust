@@ -626,3 +626,5 @@ mod tests {
         }
     }
 }
+
+pub mod single;

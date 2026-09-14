@@ -212,10 +212,32 @@ impl Archive {
         Self::from_bytes(&std::fs::read(path)?)
     }
     pub fn to_bytes(&self) -> Result<Vec<u8>> {
+        self.serialize(false)
+    }
+    /// Serialize floating attributes as f32; integers retain their integer dtype.
+    /// This affects storage only. Use AnnyF32 for single-precision evaluation.
+    pub fn to_bytes_f32(&self) -> Result<Vec<u8>> {
+        self.serialize(true)
+    }
+    pub fn save_f32(&self, path: impl AsRef<std::path::Path>) -> Result<()> {
+        std::fs::write(path, self.to_bytes_f32()?)?;
+        Ok(())
+    }
+    fn serialize(&self, single: bool) -> Result<Vec<u8>> {
         let mut buffers = Vec::new();
         for (name, t) in &self.tensors {
             t.validate()?;
             let bytes: Vec<u8> = match t.kind {
+                Kind::Float if single => {
+                    ensure(
+                        t.data.iter().all(|&x| (x as f32).is_finite()),
+                        "output overflows f32",
+                    )?;
+                    t.data
+                        .iter()
+                        .flat_map(|&x| (x as f32).to_le_bytes())
+                        .collect()
+                }
                 Kind::Float => t.data.iter().flat_map(|x| x.to_le_bytes()).collect(),
                 Kind::Index => t
                     .data
@@ -230,6 +252,7 @@ impl Archive {
             .iter()
             .map(|(n, t, b)| {
                 let dtype = match t.kind {
+                    Kind::Float if single => Dtype::F32,
                     Kind::Float => Dtype::F64,
                     Kind::Index => Dtype::I64,
                     Kind::Bool => Dtype::BOOL,

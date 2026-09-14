@@ -26,6 +26,8 @@ pub struct MeshFitOptions {
     pub max_distance: Option<f64>,
     /// Row-major target-to-Anny affine transform; default is no alignment.
     pub target_transform: [[f64; 4]; 4],
+    /// Optional explicit landmark initialization, instead of target_transform.
+    pub landmarks: Option<Landmarks>,
     pub initial: FitOptions,
     pub inverter: InverterOptions,
 }
@@ -42,6 +44,7 @@ impl Default for MeshFitOptions {
                 [0., 0., 1., 0.],
                 [0., 0., 0., 1.],
             ],
+            landmarks: None,
             initial: FitOptions::default(),
             inverter: InverterOptions::default(),
         }
@@ -120,9 +123,17 @@ pub fn fit_mesh(
             "invalid maximum correspondence distance",
         )?;
     }
+    let target_transform = if let Some(landmarks) = &options.landmarks {
+        ensure(
+            options.target_transform == MeshFitOptions::default().target_transform,
+            "choose landmarks or target_transform, not both",
+        )?;
+        landmarks.align()?.target_transform
+    } else {
+        options.target_transform
+    };
     let transform = Mat4::from_row_slice(
-        &options
-            .target_transform
+        &target_transform
             .iter()
             .flatten()
             .copied()
@@ -239,4 +250,132 @@ pub fn fit_mesh(
         distances,
         accepted_iterations: accepted,
     })
+}
+
+/// Paired landmarks in original target-mesh coordinates and desired model space.
+/// At least three non-collinear, positively weighted pairs are required. The
+/// returned transform is a proper rigid (optionally uniform-scale) transform.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Landmarks {
+    pub target_points: Vec<[f64; 3]>,
+    pub model_points: Vec<[f64; 3]>,
+    #[serde(default)]
+    pub weights: Vec<f64>,
+    #[serde(default)]
+    pub estimate_scale: bool,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Alignment {
+    pub target_transform: [[f64; 4]; 4],
+    pub scale: f64,
+    pub weighted_rms: f64,
+}
+impl Landmarks {
+    /// Weighted proper-rotation Procrustes alignment, with reflection correction.
+    /// This initialization uses supplied correspondences; it does not discover
+    /// landmarks or infer the correct orientation of an arbitrary scan.
+    pub fn align(&self) -> Result<Alignment> {
+        use crate::math::{rigid, Mat3};
+        let n = self.target_points.len();
+        ensure(
+            (3..=100_000).contains(&n) && n == self.model_points.len(),
+            "landmarks require 3..=100000 paired points",
+        )?;
+        ensure(
+            self.weights.is_empty() || self.weights.len() == n,
+            "landmark weight count mismatch",
+        )?;
+        ensure(
+            self.target_points
+                .iter()
+                .flatten()
+                .chain(self.model_points.iter().flatten())
+                .all(|x| x.is_finite()),
+            "non-finite landmark",
+        )?;
+        let mut weights = if self.weights.is_empty() {
+            vec![1.; n]
+        } else {
+            self.weights.clone()
+        };
+        ensure(
+            weights.iter().all(|w| w.is_finite() && *w >= 0.)
+                && weights.iter().filter(|w| **w > 0.).count() >= 3,
+            "need three positive finite landmark weights",
+        )?;
+        let total: f64 = weights.iter().sum();
+        ensure(
+            total.is_finite() && total > 0.,
+            "invalid landmark weight sum",
+        )?;
+        for w in &mut weights {
+            *w /= total;
+        }
+        let mut ca = Vec3::zeros();
+        let mut cb = Vec3::zeros();
+        for ((a, b), w) in self
+            .target_points
+            .iter()
+            .zip(&self.model_points)
+            .zip(&weights)
+        {
+            ca += vec3(a) * *w;
+            cb += vec3(b) * *w;
+        }
+        let mut covariance = Mat3::zeros();
+        let mut variance = 0.;
+        for ((a, b), w) in self
+            .target_points
+            .iter()
+            .zip(&self.model_points)
+            .zip(&weights)
+        {
+            let a = vec3(a) - ca;
+            let b = vec3(b) - cb;
+            covariance += b * a.transpose() * *w;
+            variance += a.norm_squared() * *w;
+        }
+        ensure(
+            covariance.iter().all(|x| x.is_finite()) && variance.is_finite() && variance > 0.,
+            "degenerate or overflowing landmark covariance",
+        )?;
+        let svd = covariance.svd(true, true);
+        ensure(
+            svd.singular_values[0] > 0. && svd.singular_values[1] > svd.singular_values[0] * 1e-10,
+            "landmarks are collinear or rank deficient",
+        )?;
+        let u = svd.u.unwrap();
+        let vt = svd.v_t.unwrap();
+        let sign = if (u * vt).determinant() < 0. { -1. } else { 1. };
+        let mut correction = Mat3::identity();
+        correction[(2, 2)] = sign;
+        let rotation = u * correction * vt;
+        let scale = if self.estimate_scale {
+            (svd.singular_values[0] + svd.singular_values[1] + sign * svd.singular_values[2])
+                / variance
+        } else {
+            1.
+        };
+        ensure(scale.is_finite() && scale > 0., "invalid landmark scale")?;
+        let transform = rigid(&(rotation * scale), &(cb - rotation * ca * scale));
+        ensure(
+            transform.iter().all(|x| x.is_finite()),
+            "overflowing landmark transform",
+        )?;
+        let rms = self
+            .target_points
+            .iter()
+            .zip(&self.model_points)
+            .zip(&weights)
+            .map(|((a, b), w)| (point(&transform, &vec3(a)) - vec3(b)).norm_squared() * *w)
+            .sum::<f64>()
+            .sqrt();
+        ensure(rms.is_finite(), "invalid landmark residual")?;
+        Ok(Alignment {
+            target_transform: std::array::from_fn(|i| std::array::from_fn(|j| transform[(i, j)])),
+            scale,
+            weighted_rms: rms,
+        })
+    }
 }

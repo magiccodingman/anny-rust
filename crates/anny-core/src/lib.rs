@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 pub mod assets;
 pub mod config;
+pub mod differentiation;
 pub mod distribution;
 pub mod import;
 pub mod inverter;
@@ -49,3 +50,9 @@ pub mod fitting;
 pub mod precompute;
 
 pub mod operations;
+
+pub mod typed;
+pub use typed::{AnnyF32, ModelOutputF32, TensorF32};
+
+pub mod motion;
+pub mod numpy;

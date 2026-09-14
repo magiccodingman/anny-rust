@@ -43,6 +43,21 @@ int32_t anny_model_query(const AnnyModel *model,const char *request_json,char **
 int32_t anny_model_transform(const AnnyModel *model,const char *operations_json,AnnyModel **out);
 int32_t anny_model_prepared_bytes(const AnnyModel *model,AnnyBytes **out);
 int32_t anny_model_transfer_pose(const AnnyModel *source,const AnnyModel *target,const char *parameters_json,const char *mode,char **out);
+/* Additive single-precision API: separate handles/views preserve every ABI-1
+ * double API. Model conversion is one-time; evaluation arithmetic is f32.
+ * Static integer-index views are exactly represented floats (checked on import).
+ * Ownership/thread rules are the same as the double APIs above. */
+typedef struct AnnyModelF32 AnnyModelF32;
+typedef struct AnnyOutputF32 AnnyOutputF32;
+typedef struct { const float *data; size_t len; const size_t *shape; size_t rank; uint32_t kind; } AnnyTensorViewF32;
+int32_t anny_model_to_f32(const AnnyModel *source,AnnyModelF32 **out);
+int32_t anny_model_f32_from_bytes(const uint8_t *bytes,size_t len,const char *config_json,AnnyModelF32 **out);
+int32_t anny_model_f32_evaluate(const AnnyModelF32 *model,const char *parameters_json,AnnyOutputF32 **out);
+int32_t anny_model_f32_tensor(const AnnyModelF32 *model,const char *name,AnnyTensorViewF32 *out);
+int32_t anny_output_f32_tensor(const AnnyOutputF32 *output,const char *name,AnnyTensorViewF32 *out);
+int32_t anny_model_f32_prepared_bytes(const AnnyModelF32 *model,AnnyBytes **out);
+void anny_model_f32_free(AnnyModelF32 *model);
+void anny_output_f32_free(AnnyOutputF32 *output);
 #ifdef __cplusplus
 }
 #endif

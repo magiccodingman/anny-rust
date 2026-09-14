@@ -132,6 +132,9 @@ fn run() -> Result<()> {
     let command = args.next().unwrap_or_else(|| "help".into());
     if ["help", "--help", "-h"].contains(&command.as_str()) {
         println!("anny <prepare|generate|inspect|compare|measure|sample|fit|import-upstream|verify-assets> [options]\n\nimport-upstream --source UPSTREAM_CHECKOUT --destination NEW_DIRECTORY\n                [--allow-revision-mismatch true]\nverify-assets --assets data\nprepare --assets data [--config config.json] --output model.safetensors\ngenerate (--assets data | --model model.safetensors) [--config config.json]\n         [--params params.json] [--obj mesh.obj] [--output output.safetensors]\n         [--mesh character.glb] [--rigged true|false]\nlineup --assets data [--config config.json] --params lineup.json --output scene.glb\nmesh-convert --source input.obj --destination output.ply\ninspect (--assets data | --model model.safetensors) [--config config.json]\ncompare --actual output.safetensors --expected reference.safetensors\n        [--atol 0.000001] [--rtol 0] [--report report.json]\n\nmeasure (--assets data | --model model.safetensors) [--params params.json]\nsample --assets data [--config config.json] [--options sample-options.json] --output params.json\nfit (--assets data | --model model.safetensors) --target target.safetensors\n    [--options fit-options.json] [--inverter-options inverter-options.json] --output fitted.json\n\nInputs, matrices, and output arrays are row-major. OBJ uses upstream Z-up meters.");
+        println!("generate/prepare/inspect/lineup/motion accept --precision f32|f64 (default f64). f32 uses native single-precision evaluation.");
+        println!("motion (--assets data | --model prepared.safetensors) --source clip.json [--fps 30] [--precision f32|f64] --output motion.glb|clip.json\namass-inspect --source sequence.npz [--output description.json]");
+        println!("amass-fit (--assets data | --model prepared.safetensors) --source sequence.npz --source-model supplied-smplx.safetensors --mapping explicit-map.json [--options fit.json] --output clip.json|clip.glb [--report fit-report.json]");
         authoring::help();
         return Ok(());
     }
@@ -163,6 +166,10 @@ fn run() -> Result<()> {
         "correspondence",
         "iterations",
         "warmup",
+        "precision",
+        "fps",
+        "source-model",
+        "mapping",
     ]
     .into_iter()
     .collect();
@@ -181,10 +188,91 @@ fn run() -> Result<()> {
             return Err(error(format!("duplicate {flag}")));
         }
     }
+    let single = match opts.get("precision").map(String::as_str) {
+        None | Some("f64") => false,
+        Some("f32") => true,
+        _ => return Err(error("--precision expects f32 or f64")),
+    };
+    if opts.contains_key("precision")
+        && !["generate", "prepare", "inspect", "lineup", "motion"].contains(&command.as_str())
+    {
+        return Err(error(
+            "--precision currently applies to generate, prepare, inspect, lineup and motion",
+        ));
+    }
     if authoring::run(&command, &opts)? {
         return Ok(());
     }
     match command.as_str() {
+        "amass-fit" => {
+            let sequence = anny_core::motion::AmassSequence::from_npz(&std::fs::read(required(
+                &opts, "source",
+            )?)?)?;
+            let source = anny_core::smpl::SmplModel::load(required(&opts, "source-model")?)?;
+            let target = model(&opts)?;
+            let mapping: anny_core::motion::VertexMap = read_json(required(&opts, "mapping")?)?;
+            let options = opts
+                .get("options")
+                .map(|p| read_json(p))
+                .transpose()?
+                .unwrap_or_default();
+            let result =
+                anny_core::motion::fit_amass(&sequence, &source, &target, &mapping, &options)?;
+            let dest = Path::new(required(&opts, "output")?);
+            parent(dest)?;
+            if dest.extension().and_then(|s| s.to_str()) == Some("json") {
+                std::fs::write(dest, serde_json::to_vec_pretty(&result.clip)?)?;
+            } else {
+                result
+                    .clip
+                    .to_scene(&target, anny_core::motion::Precision::F64)?
+                    .save(dest)?;
+            }
+            if let Some(report) = opts.get("report") {
+                parent(Path::new(report))?;
+                std::fs::write(report, serde_json::to_vec_pretty(&result)?)?;
+            }
+            println!(
+                "Fitted {} frames with supplied source model and explicit correspondence",
+                result.clip.frames.len()
+            );
+        }
+        "amass-inspect" => {
+            let sequence = anny_core::motion::AmassSequence::from_npz(&std::fs::read(required(
+                &opts, "source",
+            )?)?)?;
+            let text = serde_json::to_string_pretty(&sequence.describe())?;
+            if let Some(path) = opts.get("output") {
+                parent(Path::new(path))?;
+                std::fs::write(path, &text)?;
+            }
+            println!("{text}");
+        }
+        "motion" => {
+            let model = model(&opts)?;
+            let mut clip: anny_core::motion::PoseClip = read_json(required(&opts, "source")?)?;
+            clip.validate(&model)?;
+            if let Some(fps) = opts.get("fps") {
+                clip = clip.resample(&model, fps.parse().map_err(|_| error("invalid fps"))?)?;
+            }
+            let dest = Path::new(required(&opts, "output")?);
+            parent(dest)?;
+            if dest.extension().and_then(|x| x.to_str()) == Some("json") {
+                std::fs::write(dest, serde_json::to_vec_pretty(&clip)?)?;
+            } else {
+                let mode = if single {
+                    anny_core::motion::Precision::F32
+                } else {
+                    anny_core::motion::Precision::F64
+                };
+                clip.to_scene(&model, mode)?.save(dest)?;
+            }
+            println!(
+                "Exported {} native pose frames to {}",
+                clip.frames.len(),
+                dest.display()
+            );
+        }
         "import-upstream" => {
             let allow = opts
                 .get("allow-revision-mismatch")
@@ -214,13 +302,22 @@ fn run() -> Result<()> {
         "compare" => compare(&opts)?,
         "inspect" => {
             let m = model(&opts)?;
-            println!("{}", serde_json::to_string_pretty(&m.describe())?);
+            let info = if single {
+                m.to_f32()?.describe()
+            } else {
+                m.describe()
+            };
+            println!("{}", serde_json::to_string_pretty(&info)?);
         }
         "prepare" => {
             let m = model(&opts)?;
             let path = PathBuf::from(required(&opts, "output")?);
             parent(&path)?;
-            m.data.save(&path, Some(&m.config))?;
+            if single {
+                std::fs::write(&path, m.to_f32()?.to_bytes()?)?;
+            } else {
+                m.data.save(&path, Some(&m.config))?;
+            }
             println!(
                 "Prepared {} vertices, {} bones: {}",
                 m.data.vertex_count(),
@@ -322,8 +419,19 @@ fn run() -> Result<()> {
             let characters: Vec<Character> = read_json(required(&opts, "params")?)?;
             let m = model(&opts)?;
             let mut scene = anny_core::scene::Scene::new();
+            let m32 = if single { Some(m.to_f32()?) } else { None };
             for character in characters {
-                scene.add_character(&m, &character.parameters, &character.export)?;
+                let output = if let Some(m32) = &m32 {
+                    m32.forward(&character.parameters)?.to_reference()
+                } else {
+                    m.forward(&character.parameters)?
+                };
+                scene.add_evaluated_character(
+                    &m,
+                    &character.parameters,
+                    &character.export,
+                    &output,
+                )?;
             }
             let path = Path::new(required(&opts, "output")?);
             parent(path)?;
@@ -347,7 +455,11 @@ fn run() -> Result<()> {
                 .map(|p| read_json(p))
                 .transpose()?
                 .unwrap_or_default();
-            let out = m.forward(&params)?;
+            let out = if single {
+                m.to_f32()?.forward(&params)?.to_reference()
+            } else {
+                m.forward(&params)?
+            };
             if let Some(path) = opts.get("mesh") {
                 let mut scene = anny_core::scene::Scene::new();
                 let rigged = match opts.get("rigged").map(String::as_str) {
@@ -355,13 +467,14 @@ fn run() -> Result<()> {
                     Some("true") => true,
                     _ => return Err(error("--rigged expects true or false")),
                 };
-                scene.add_character(
+                scene.add_evaluated_character(
                     &m,
                     &params,
                     &anny_core::scene::CharacterExport {
                         rigged,
                         ..Default::default()
                     },
+                    &out,
                 )?;
                 parent(Path::new(path))?;
                 match Path::new(path)
@@ -435,7 +548,15 @@ fn run() -> Result<()> {
                         a.metadata
                             .insert(key.into(), serde_json::to_string(&value)?);
                     }
-                    a.save(path)?;
+                    a.metadata.insert(
+                        "anny_rust_evaluation_precision".into(),
+                        if single { "f32" } else { "f64" }.into(),
+                    );
+                    if single {
+                        a.save_f32(path)?;
+                    } else {
+                        a.save(path)?;
+                    }
                 }
             }
             println!(

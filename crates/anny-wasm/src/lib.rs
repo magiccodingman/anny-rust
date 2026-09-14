@@ -145,3 +145,13 @@ fn indices(t: &Tensor) -> Result<js_sys::Uint32Array, JsValue> {
     }
     Ok(js_sys::Uint32Array::from(values.as_slice()))
 }
+
+pub mod single;
+#[wasm_bindgen]
+impl AnnyModel {
+    pub fn to_f32(&self) -> Result<single::AnnyModelF32, JsValue> {
+        Ok(single::AnnyModelF32 {
+            model: self.model.to_f32().map_err(js_error)?,
+        })
+    }
+}

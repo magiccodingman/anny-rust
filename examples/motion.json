@@ -1,0 +1,9 @@
+{
+  "name": "Native root translation demo",
+  "parameters": {"pose_parameterization": "local-bone"},
+  "frames": [
+    {"time": 0.0, "pose_parameters": {}},
+    {"time": 1.0, "pose_parameters": {"root": [[1,0,0,0.25],[0,1,0,0],[0,0,1,0],[0,0,0,1]]}},
+    {"time": 2.0, "pose_parameters": {}}
+  ]
+}

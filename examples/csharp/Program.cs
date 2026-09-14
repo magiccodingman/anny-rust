@@ -27,4 +27,11 @@ try
 }
 finally { File.Delete(temporary); }
 Console.WriteLine("C# query, rigged GLB, transform, pose transfer and prepared reload: PASS");
+using var single = model.ToSinglePrecision();
+var singleMesh = single.Generate("{\"phenotype_kwargs\":{\"height\":0.6,\"weight\":0.4}}");
+if (singleMesh.Vertices.Length != mesh.Vertices.Length || singleMesh.Vertices.Any(v => !float.IsFinite(v)))
+    throw new InvalidDataException("Invalid f32 mesh.");
+var error = mesh.Vertices.Zip(singleMesh.Vertices, (a,b) => Math.Abs(a-b)).Max();
+if (error > 2e-4) throw new InvalidDataException($"f32 mismatch: {error}");
+Console.WriteLine($"Native f32 C# evaluation: PASS; maximum vertex error {error:E}");
 return 0;

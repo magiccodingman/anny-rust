@@ -231,6 +231,19 @@ impl Scene {
         parameters: &Parameters,
         options: &CharacterExport,
     ) -> Result<usize> {
+        let output = model.forward(parameters)?;
+        self.add_evaluated_character(model, parameters, options, &output)
+    }
+    /// Pack an already evaluated character (including a widened f32 result).
+    /// The output must belong to this model/configuration and parameter set.
+    /// This method performs no forward evaluation; it checks array dimensions.
+    pub fn add_evaluated_character(
+        &mut self,
+        model: &Anny,
+        parameters: &Parameters,
+        options: &CharacterExport,
+        output: &crate::ModelOutput,
+    ) -> Result<usize> {
         ensure(
             !options.rigged || model.config.skinning_method != SkinningMethod::Dqs,
             "glTF skins use LBS, not DQS; export a baked mesh or select LBS",
@@ -239,7 +252,9 @@ impl Scene {
             options.translation.iter().all(|x| x.is_finite()),
             "invalid scene translation",
         )?;
-        let output = model.forward(parameters)?;
+        for tensor in output.arrays.values() {
+            tensor.validate()?;
+        }
         let n = model.data.vertex_count();
         ensure(
             options.batch_index < output.get("vertices")?.shape[0],
