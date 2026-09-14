@@ -88,8 +88,33 @@ impl TensorF32 {
         }
         Ok(())
     }
+    /// Check that this tensor has exactly `shape`, requiring an O(1) structural check only.
+    ///
+    /// See [`crate::tensor::Tensor::expect_shape`] for why this is not a full validation: the
+    /// finiteness scan is O(elements) and this sits on the evaluation hot path for tensors in the
+    /// hundreds of megabytes, which cost ~8 ms per call on the typed path. Finiteness is enforced
+    /// once, at construction; debug builds keep the full scan.
     pub fn expect_shape(&self, shape: &[usize], name: &str) -> Result<()> {
+        #[cfg(debug_assertions)]
         self.validate()?;
+        self.checked_shape(shape, name)
+    }
+    /// The O(1) half of [`TensorF32::expect_shape`]: rank/product/entry-count consistency plus the
+    /// expected shape.
+    pub fn checked_shape(&self, shape: &[usize], name: &str) -> Result<()> {
+        let n = self
+            .shape
+            .iter()
+            .try_fold(1usize, |a, &b| a.checked_mul(b))
+            .ok_or_else(|| Error::Invalid("tensor shape overflow".into()))?;
+        ensure(
+            n == self.data.len(),
+            format!(
+                "shape {:?} needs {n} entries, got {}",
+                self.shape,
+                self.data.len()
+            ),
+        )?;
         ensure(
             self.shape == shape,
             format!("{name}: expected {shape:?}, got {:?}", self.shape),

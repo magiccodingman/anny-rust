@@ -1,147 +1,149 @@
-# Native performance baseline
+# Native runtime performance
 
-Measured on the committed model (`data/`, 13,718 vertices, 27,420 faces, 104 bones in the default
-anny rig), Rust 1.90.0 release, single-threaded, x86_64:
+Measured on the committed model (`data/cached/anny.pth.safetensors`, schema 11) with
+`cargo bench -p anny-core --locked`: 13,718 vertices, 27,420 faces, 104 bones, Rust 1.90.0 release
+profile, single-threaded, x86_64 (7.0.0-30-generic). Numbers are absolute wall-clock costs of real
+operations on the real asset, not microbenchmarks. `min` is over the stated iteration count after
+warmup; `median` is included because this host shows 3-10% run-to-run spread and min-only figures
+flatter the machine.
 
-| | |
-|---|---|
-| CPU | AMD Ryzen 9 7950X3D (16 cores / 32 threads) |
-| OS | Linux |
-| Rust | 1.90.0 |
-| Profile | `--release` (`lto = "thin"`) |
-
-Reproduce with:
-
-```sh
-cargo bench -p anny-core --bench runtime
+```
+cargo bench -p anny-core --locked     # requires data/ to be populated
 ```
 
-The harness is dependency-free on purpose (`harness = false`): `cargo bench` keeps working offline
-and `Cargo.lock` stays untouched. It asserts the batch dimension it reports, so a "100 characters"
-row cannot silently be one character.
+## Headline: the fixed per-call cost was redundant tensor validation
 
-## Baseline
+The first version of this document recorded ~9.2 ms of fixed cost per `forward` call, assumed it was
+the blendshape accumulation, and (with the pose-session work) treated the rest model as the target.
+**That diagnosis was wrong, and the way it was wrong matters.**
 
-| Group | Case | min | median |
+`Tensor::expect_shape` / `TensorF32::expect_shape` called `validate()`, and `validate()` scans every
+element for finiteness. Tensors reached through `expect_shape` include the 205 MB blendshapes array,
+so *every* evaluation streamed 205 MB of untouched data through a finiteness check — a pure
+memory-bandwidth cost with no bearing on the result. The cost scaled with tensor size exactly as a
+scan predicts, which is what identified it:
+
+| tensor passed to `expect_shape` | bytes | measured call |
+|---|---|---|
+| `bone_heads_blendshapes` | 1.56 MB | 89 us |
+| `bone_orientation_blendshapes` | 4.68 MB | 262 us |
+| `blendshapes` | 205 MB | ~9.4 ms |
+
+Evidence: the shipped `apply_blendshapes` call measured **9.47 ms**, while a byte-identical copy of
+the same function, on the same tensors, in the same process, without the `expect_shape` prologue
+measured **0.234 ms**. 40x, for zero numerical difference.
+
+The fix: `expect_shape` keeps the O(1) structural check (shape match plus element-count consistency)
+and no longer re-validates finiteness of data that was already validated when it was built. Debug
+builds still run the full scan, so `cargo test` keeps the paranoid check and CI keeps catching a
+tensor whose public `data` was mutated into a non-finite state; release builds pay for it once at
+construction instead of once per call.
+
+| path | before (min) | after (min) | speedup |
 |---|---|---|---|
-| prepare | cold prepare (read + convert committed archives) | 2180.5 ms | 2191.9 ms |
-| prepare | reload prepared f32 payload (104.1 MB) | 306.8 ms | 316.1 ms |
-| generate | f64 default | 9.173 ms | 9.449 ms |
-| generate | f64 dqs | 10.041 ms | 10.541 ms |
-| generate | f64 makehuman rig | 9.453 ms | 10.141 ms |
-| generate | f64 all phenotypes | 9.306 ms | 9.487 ms |
-| generate | f64 local + facial all | 16.272 ms | 16.661 ms |
-| generate | f32 typed (lbs) | 7.987 ms | 8.141 ms |
-| generate | f32 typed (dqs) | 8.510 ms | 8.748 ms |
-| generate | f32 typed (warp_lbs) | 8.071 ms | 8.320 ms |
-| batch | generate x1 | 9.478 ms | 9.660 ms |
-| batch | generate x10 | 12.053 ms | 12.418 ms |
-| batch | generate x100 | 36.282 ms | 37.058 ms |
-| derive | measure | 16.752 ms | 16.929 ms |
-| derive | keypoints | 10.115 ms | 10.390 ms |
-| derive | collision | 73.646 ms | 74.662 ms |
-| derive | pose-convert world | 9.513 ms | 9.970 ms |
+| `generate f64 default` | 9.173 ms | **0.572 ms** | 16.0x |
+| `generate f32 typed (lbs)` | 7.987 ms | **0.431 ms** | 18.5x |
+| `split rest_model default` | 8.421 ms | **0.302 ms** | 27.9x |
+| `derive keypoints` | 10.120 ms | **1.370 ms** | 7.4x |
+| `derive pose-convert world` | 9.510 ms | **0.655 ms** | 14.5x |
+| `derive measure` | 16.750 ms | **8.497 ms** | 2.0x |
+| `batch generate x100` | 36.282 ms | **28.590 ms** | 1.27x |
+| `derive collision` | 73.600 ms | **64.632 ms** | 1.14x |
 
-The f32 rows are genuine f32 evaluations through `AnnyF32` — the model is converted once and
-evaluated through the typed API, not f64 evaluation with a cast on the output.
+Verification that the fix changed nothing numerically: the release real-data parity suites reproduce
+their recorded values to the last digit (skin weights `3.3306690738754696e-16`, orientation caches
+`4.0719240049225114e-8` / `3.7339730113439273e-8` / `1.723906197792502e-7`, soma `0e0`, JVP
+`1.474103678e-10`). Validation is not arithmetic; the equivalence was measured anyway.
 
-## What the baseline says
+## Current state (post-fix, min / median ms)
 
-**1. Single-character generation is dominated by fixed per-call cost, not by the character.**
-100 characters cost 36.3 ms, one costs 9.5 ms. The marginal cost is ~0.36 ms/character, so about
-**9.1 ms of every single-character call is fixed overhead**. This is the pose-only/animation case —
-the most common runtime case in a game or an editor slider — and it currently pays for a full
-rest-model rebuild that the pose did not change. This was the highest-value optimization in the
-project and is now **implemented and measured** (see "Pose-only update" below): the update path is
-**0.281 ms** against 9.021 ms for a full call.
+| operation | min | median |
+|---|---|---|
+| `prepare default (cold)` | 2140.970 ms | 2171.778 ms |
+| `reload prepared f32 bytes` (104.1 MB payload) | 289.390 ms | 290.840 ms |
+| `generate f64 default` | 0.572 ms | 0.600 ms |
+| `generate f64 dqs` | 1.331 ms | 1.443 ms |
+| `generate f64 makehuman rig` | 0.559 ms | 0.648 ms |
+| `generate f64 all phenotypes` | 0.615 ms | 0.753 ms |
+| `generate f64 local+facial all` | 0.579 ms | 0.613 ms |
+| `generate f32 typed (lbs)` | 0.431 ms | 0.438 ms |
+| `generate f32 typed (dqs)` | 0.940 ms | 0.982 ms |
+| `generate f32 typed (warp_lbs)` | 0.439 ms | 0.461 ms |
+| `batch generate x1` (marginal) | 0.620 ms | 619.976 us/character |
+| `batch generate x10` (marginal) | 3.530 ms | 352.984 us/character |
+| `batch generate x100` (marginal) | 28.590 ms | 285.899 us/character |
+| `split coefficients default` | 0.013 ms | 0.013 ms |
+| `split rest_model default` | 0.302 ms | 0.350 ms |
+| `session update pose (reused rest)` | 0.282 ms | 0.291 ms |
+| `session build (coefficients + rest)` | 0.349 ms | 0.426 ms |
+| `session f32 typed update pose` | 0.283 ms | 0.289 ms |
+| `session f32 typed full call` | 0.436 ms | 0.453 ms |
+| `derive measure` | 8.497 ms | 8.605 ms |
+| `derive keypoints` | 1.370 ms | 1.696 ms |
+| `derive collision` | 64.632 ms | 66.889 ms |
+| `derive pose-convert world` | 0.655 ms | 0.774 ms |
 
-## Pose-only update (`Anny::pose_session`)
+## Findings
 
-`forward` is `coefficients` + `rest_model` + `pose_model`. Only the last depends on the pose, so the
-first two are cacheable. Measuring them separately was necessary to avoid optimizing the wrong step —
-and it did not go the way the earlier guess assumed:
+**1. Generation is now compute-bound and roughly linear in characters.** One character costs
+0.572 ms and 100 cost 28.59 ms, i.e. a marginal 286 us/character and an amortized fixed component of
+only ~0.3 ms/call. Before the validation fix the same curve was dominated by a fixed ~9 ms, which is
+why batching appeared strongly sublinear (1,205 us/character at x10 vs 9,478 at x1). That appearance
+was the scan being amortized across the batch, not a batching win. The honest reading of the new
+curve: there is no longer a fixed cost worth amortizing, and per-character work is now the whole
+story. This is the SIMD/sparsity target.
 
-| step | min | median | share of a full call |
-|---|---|---|---|
-| `generate f64 default` (whole call) | 9.021 ms | 9.440 ms | 100% |
-| `split coefficients default` | 0.013 ms | 0.013 ms | 0.1% |
-| `split rest_model default` | 8.421 ms | 8.593 ms | 93.3% |
-| `session build (coefficients + rest)` | 8.551–9.214 ms | 8.753–9.307 ms | — |
-| `session update pose (reused rest)` | **0.281–0.282 ms** | **0.288–0.303 ms** | **3.1%** |
-| `session f32 typed update pose` | **0.275 ms** | **0.280 ms** | — |
-| `session f32 typed full call` | 7.970 ms | 8.079 ms | 100% |
+**2. The rest model is 0.302 ms of a 0.572 ms call, and coefficients are 0.013 ms.** So a full `f64`
+generation is roughly half rest model, half pose model. `apply_blendshapes` skips zero coefficients
+already, and the default parameter set activates 32 of 624 — the meaningful remaining optimizations
+are the accumulation loop itself (vectorization, blocked access) and skipping *slices* entirely.
 
-(the ranges are run-to-run spread on the same host, not different builds)
+**3. The pose session is a real but modest win, and the earlier claim for it was wrong.** With the
+session: repeated re-posing costs 0.282 ms instead of a full 0.572 ms (**2.0x**); on the typed f32
+path 0.283 ms instead of 0.436 ms (**1.5x**). An earlier revision of this document claimed 32x,
+because the session was measured while every path paid the 205 MB validation scan that the session
+happened to skip. The scan fix removed the artificial part of that win. The session is still worth
+having — it is cheap to build (0.349 ms, so it pays for itself in one or two updates), it is the
+right API shape for animation and editor sliders, and it avoids re-deriving the rest model — but it
+is a 1.5-2x optimization, not a 32x one. Both `Anny::pose_session` and `AnnyF32::pose_session` exist
+and are exact-equivalence tested (`max difference 0e0` against `forward` on real data over 8 poses,
+all five pose conventions, plus bit-identical f32).
 
-So the fixed 9.1 ms is **the rest model, not coefficients and not allocation**: coefficients are 0.1%
-of the call, which is two orders of magnitude below the earlier "per-call allocations behind the
-9.1 ms" hypothesis. That hypothesis was wrong and is corrected here.
+**4. Collision is now the single biggest outlier by an order of magnitude.** `derive collision` costs
+64.6 ms — 113x a full generation of the same character. Unlike the scan, this is not obviously
+wasted work: `SelfInterpenetrationModule::new` builds a per-vertex `BTreeSet<String>` of bone labels
+and a per-face merged label set (13,718 sets and ~82k `String` clones over 27,420 faces), then
+`forward` searches for interpenetrating face partners. Construction is rebuilt per request and is
+string/allocation-heavy; the probe to separate construction from search has not been run yet, so the
+ratio between "avoidable per-call setup" and "intrinsic geometry work" is **not yet known** and is
+not claimed here.
 
-**Measured result: 0.281 ms per pose update against 9.021–9.721 ms per full call — a 32x reduction,
-8.74 ms saved per update.** On the typed f32 path that a game actually calls it is **0.275 ms against
-7.970 ms — 29x**. Building a session costs ~8.6–9.2 ms, so it breaks even after **one** update; every
-further pose costs ~0.28 ms. At 0.28 ms an update runs ~3,500 times per second single-threaded,
-which is not the bottleneck for a 60 Hz editor or animation loop.
+**5. `derive measure` (8.5 ms) and `derive keypoints` (1.4 ms) also construct their module per
+request**, and `KeypointsRegressor::coco` reads a converted asset from the store each time. These are
+the same shape of finding as the collision module: a reusable object rebuilt per call.
 
-Equivalence is asserted, not assumed: `crates/anny-core/tests/pose_session.rs` compares
-`session.update(pose)` against `forward` for the same parameters across all five pose
-parameterizations, batch sizes (including changing the batch size between updates), the
-`return_bone_ends` setting, and after a rejected pose, and requires **exact** equality (max difference
-`0.0`), because the session runs the same code on the same coefficients and a tolerance would hide a
-real divergence. The typed f32 session is checked the same way, bit for bit. On the committed
-13,718-vertex / 104-bone model over 8 poses the maximum difference is `0e0` on both paths.
+**6. Load time is dominated by cold preparation (2.14 s) and by the 104.1 MB f32 payload reload
+(289 ms).** Startup cost for applications that ship a prepared model: ~0.29 s.
 
-Both paths are done. The remaining gap is the **product surfaces**: nothing above `anny-core` exposes a
-session yet, so a Unity or WASM caller still has to call `forward` per pose. Wiring the session through
-the C/WASM/CLI control plane is now the highest-value follow-up, since the core win is otherwise only
-reachable from Rust.
+## Ranking of remaining work, by measured upside
 
-
-**2. The prepared payload is large and slow to load.** 104.1 MB and ~307 ms. That is larger than the
-committed source data because the prepared form materializes blendshape deltas for the full model.
-This is the startup cost for a native or Unity application, and it is the reason the mission's
-"prepared model loading / mmap-friendly representation" item exists. Worth profiling properly: at
-104 MB it is plausible that a memory-mapped, zero-copy load removes most of the 307 ms.
-
-**3. f32 is a real win but a modest one (13%).** 7.99 ms vs 9.17 ms for the default path. Because
-fixed overhead dominates a single call, this understates the f32 advantage for the batched/runtime
-case; the same conversion will be re-measured after the pose-only path exists.
-
-**4. Ancillary selections cost real time.** `local + facial all` is 1.8x the default configuration
-(16.3 ms vs 9.2 ms). Users who turn on local changes and facial actions pay for it on every call.
-
-**5. Some operations are disproportionately expensive for what they return.** `collision` at 73.6 ms
-is roughly 8x a full generation, and `measure` at 16.8 ms is nearly 2x. These are the operations a
-fitting/authoring loop calls repeatedly, so they matter more than their absolute size suggests.
-
-**6. Cold prepare is ~2.2 s.** Acceptable as a build-time step; it must not appear on any runtime
-path, and the prepared payload is what runtimes should load.
-
-## Ranking for the optimization phases
-
-Ordered by expected value per unit of risk, with correctness preserved throughout:
-
-1. ~~**Pose-only/incremental update**~~ — **DONE** for `Anny` and `AnnyF32` (0.281 / 0.275 ms vs 9.02 /
-   7.97 ms; 32x and 29x). This redirected the plan: since `rest_model` is 93% of the fixed cost and
-   coefficients are 0.1%, making `rest_model` itself faster is now the whole ballgame for the
-   general path, not allocation hygiene. Wiring the session through the C/WASM/CLI surfaces is the
-   open follow-up so non-Rust callers can reach the win.
-2. **`rest_model` kernel cost** — the 8.42 ms step. It is blendshape accumulation plus bone-orientation
-   propagation over 104 bones and 13,718 vertices; SIMD and better memory layout apply directly here,
-   and it no longer has to be guessed at, only profiled.
-3. **Prepared-model loading** — profile the 293–307 ms/104 MB load; consider mmap/zero-copy.
-4. **SIMD in the skinning and blendshape accumulation kernels** — now measurable against the rows
-   above, with the scalar path staying the correctness reference.
-5. **GPU/WebGPU evaluation** — targets the batched path (`x100` at 36.3 ms = 0.36 ms/character) and
-   GPU-resident vertex buffers, not single-character latency, which fixed overhead dominates.
-
-Every one of these must be validated against the existing parity/derivative/typed qualifications;
-the f32 and f64 paths are both semantically load-bearing and neither may regress into a cast.
+1. **`derive collision` (64.6 ms)** — separate module construction from the search, then cut the
+   allocation-heavy setup (label interning instead of `String` sets) and any cacheable reuse. Needs a
+   measurement first.
+2. **Per-character accumulation (~286 us/character)** — now the whole cost of generation. SIMD
+   (explicitly vectorized f64/f32 kernels) and coefficient-blocked access. This is also what
+   `batch generate x100` work in a population-scale job depends on.
+3. **`derive measure` (8.5 ms)** — find out whether it is the measurement's geometry queries or its
+   per-request construction.
+4. **Startup (289 ms reload / 2.14 s prepare)** — mmap the prepared payload, or avoid materializing
+   blendshapes that a given configuration never uses.
+5. **GPU/WebGPU, Unity integration, browser editor, C/C#/WASM session exposure** — untouched. The
+   session API exists only in Rust (`Anny::pose_session`, `AnnyF32::pose_session`); no CLI, C, WASM or
+   C# surface exposes it yet, so the 1.5-2x is not reachable from those callers.
 
 ## Status
 
-This document records a **baseline plus the first optimized path**. The pose-only update for `Anny` is
-implemented and measured (32x on the repeated-pose path, exact-equivalence tested). GPU/WebGPU, SIMD
-and the broader profiling/optimization work have not been started, and no row above is a real-time
-performance guarantee. Rows are added or revised only with measured numbers from the harness on the
-configuration described above.
+Two optimizations are implemented and measured: the validation-scan fix (16-18x on every generation
+path) and the pose session (1.5-2x on repeated re-posing). Both are exact-equivalence tested against
+the unoptimized path. Everything in the ranking above is *not* done, and no row in this document is a
+real-time performance guarantee outside the measured host.

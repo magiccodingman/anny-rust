@@ -199,6 +199,7 @@ pub fn apply_blendshapes(
     }
     Ok(out)
 }
+
 pub fn rest_model(d: &ModelData, rig: &RigConfig, coeffs: &Tensor) -> Result<ModelOutput> {
     ensure(
         coeffs.shape.len() == 2 && coeffs.shape[0] > 0 && coeffs.shape[1] == d.blendshape_count(),

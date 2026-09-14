@@ -82,8 +82,37 @@ impl Tensor {
         }
         Ok(())
     }
+    /// Check that this tensor has exactly `shape`, requiring an O(1) structural check only.
+    ///
+    /// This is deliberately *not* a full [`Tensor::validate`]: validation includes a finiteness scan
+    /// over every element, and `expect_shape` sits on the evaluation hot path for tensors that can be
+    /// hundreds of megabytes (the default model's `blendshapes` is 205 MB). Re-scanning that on every
+    /// call cost ~9 ms, which was 93% of the fixed per-call cost of `forward`, and it re-derives a
+    /// property the tensor already had when it was built: finiteness is enforced once, at
+    /// construction (`Tensor::new`, `from_nested`, `from_bytes`, `checked_indices`). Debug builds
+    /// still run the full scan so a tensor whose public `data` was mutated into a non-finite state is
+    /// caught by the test suite.
     pub fn expect_shape(&self, shape: &[usize], name: &str) -> Result<()> {
+        #[cfg(debug_assertions)]
         self.validate()?;
+        self.checked_shape(shape, name)
+    }
+    /// The O(1) half of [`Tensor::expect_shape`]: rank/product/entry-count consistency plus the
+    /// expected shape.
+    pub fn checked_shape(&self, shape: &[usize], name: &str) -> Result<()> {
+        let n = self
+            .shape
+            .iter()
+            .try_fold(1usize, |a, &b| a.checked_mul(b))
+            .ok_or_else(|| Error::Invalid("tensor shape overflow".into()))?;
+        ensure(
+            n == self.data.len(),
+            format!(
+                "shape {:?} needs {n} entries, got {}",
+                self.shape,
+                self.data.len()
+            ),
+        )?;
         ensure(
             self.shape == shape,
             format!("{name}: expected {shape:?}, got {:?}", self.shape),

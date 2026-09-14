@@ -471,12 +471,16 @@ fn pose_transfer_between_real_rig_variants_reproduces_the_posed_mesh() -> Result
     let store = assets::AssetStore::new(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data"),
     );
-    let mut source_config = AnnyConfig::default();
-    source_config.rig = RigSpec::Name("makehuman".into());
-    source_config.local_changes = Selection::Preset("default".into());
-    source_config.facial_actions = Selection::all();
-    let mut target_config = source_config.clone();
-    target_config.rig = RigSpec::Name("anny".into());
+    let source_config = AnnyConfig {
+        rig: RigSpec::Name("makehuman".into()),
+        local_changes: Selection::Preset("default".into()),
+        facial_actions: Selection::all(),
+        ..Default::default()
+    };
+    let target_config = AnnyConfig {
+        rig: RigSpec::Name("anny".into()),
+        ..source_config.clone()
+    };
     let source = store.build(&source_config)?;
     let target = store.build(&target_config)?;
     eprintln!(
@@ -528,11 +532,15 @@ fn pose_transfer_from_a_pruned_rig_to_a_full_rig_is_rejected() -> Result<()> {
     let store = assets::AssetStore::new(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data"),
     );
-    let mut source_config = AnnyConfig::default();
-    source_config.local_changes = Selection::Preset("default".into());
-    source_config.facial_actions = Selection::all();
-    let mut target_config = source_config.clone();
-    target_config.rig = RigSpec::Name("makehuman".into());
+    let source_config = AnnyConfig {
+        local_changes: Selection::Preset("default".into()),
+        facial_actions: Selection::all(),
+        ..Default::default()
+    };
+    let target_config = AnnyConfig {
+        rig: RigSpec::Name("makehuman".into()),
+        ..source_config.clone()
+    };
     let source = store.build(&source_config)?;
     let target = store.build(&target_config)?;
     assert!(
