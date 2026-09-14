@@ -1,5 +1,5 @@
 {
-  "parts": ["native-io-000.b64", "native-io-010.b64", "native-io-011.b64", "native-io-012.b64", "native-io-013.b64"],
-  "sha256": "4479f8384f6adddd5df84dd9b3aac97342a19871f449386a8353eed8fb418e43",
-  "message": "Add native mesh IO, rigged glTF scenes and animations, and C/C#/WASM GLB export"
+  "parts": ["authoring-000.b64", "authoring-001.b64", "authoring-002.b64", "authoring-003.b64", "authoring-004.b64", "authoring-005.b64", "authoring-006.b64", "authoring-007.b64", "authoring-008.b64", "authoring-009.b64", "authoring-010.b64", "authoring-011.b64", "authoring-012.b64", "authoring-013.b64"],
+  "sha256": "09e68298870ca48d4c97d0f8561689540061aeef96b3a9071cefc14a67b215449",
+  "message": "Add native authoring transforms, rig and weight preprocessing, cache, mesh fitting and secondary bindings"
 }
