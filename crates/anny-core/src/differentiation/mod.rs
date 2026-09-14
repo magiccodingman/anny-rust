@@ -142,8 +142,10 @@ fn coefficient_direction(model: &Anny, p: &Parameters, dir: &ParameterDirection)
     let off = off + fa.shape[1];
     for (i, name) in model.local_change_labels.iter().enumerate() {
         let d = *dir.local_changes.get(name).unwrap_or(&0.);
-        out.data[off + 2 * i] = if lo.data[i] > 0. { d } else { 0. };
-        out.data[off + 2 * i + 1] = if lo.data[i] < 0. { -d } else { 0. };
+        // Upstream deliberately differentiates both masked branches at zero.
+        // A ReLU-style zero derivative would leave newly enabled locals dead.
+        out.data[off + 2 * i] = if lo.data[i] >= 0. { d } else { 0. };
+        out.data[off + 2 * i + 1] = if lo.data[i] <= 0. { -d } else { 0. };
     }
     out.validate()?;
     Ok(out)
@@ -428,6 +430,8 @@ fn posed(
 /// Return the Jacobian-vector product for a single character. Branch decisions
 /// follow the evaluated point. At non-unique orientation projections the function
 /// returns an error rather than claiming a derivative. No epsilon is used.
+/// At a zero local morph the upstream masked-branch subgradient is used: both
+/// signed branches contribute. This is not a classical derivative at the kink.
 pub fn jvp(m: &Anny, p: &Parameters, direction: &ParameterDirection) -> Result<ModelOutput> {
     let base = m.forward(p)?;
     jvp_at(m, p, direction, &base)
