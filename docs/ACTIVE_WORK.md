@@ -4,36 +4,47 @@ Branch: `codex/native-v1-completion`, base `main@2ff24c4d8e864bba0e460f6074d2343
 Do not merge, force-push, alter canonical assets, or overwrite the owner's tools.
 Publish small checkpoints; local agent workspaces are transient.
 
-## Recovered in this source checkpoint
+## Published source recovered and verified
 
-- Shared source equation kernels used by f64 and actual f32 arithmetic.
-- Typed f32 model/result APIs, C/C#/WASM bindings and CLI precision selection.
-- Native NPY/NPZ decoding, Anny pose clips/resampling and GLB animation.
-- Optional supplied-model AMASS fitting with explicit vertex correspondence.
-- Landmark alignment initialization for fitting.
-- **WIP** specialized analytic parameter JVPs (not general autograd).
+Source snapshot `6547a331c3d32b45dc0751d81e5a928f2a2a0915` has exact local/remote
+Git tree `f0677f4655747c2681f6ebc8bb09df21f63fe9ec`. Source is in ordinary
+Rust paths, not merely an encoded delivery payload.
 
-## Validation / active problem
+- Shared f32/f64 equations and genuine single-precision model evaluation.
+- Typed C/C#/WASM interfaces and native CLI precision selection.
+- Native NPY/NPZ decoding, pose clips/resampling and supplied-pose GLB animation.
+- Optional supplied-model AMASS baseline with explicit vertex correspondence.
+- Landmark fitting initialization.
+- Specialized analytic parameter JVPs and calibrated prior derivatives.
 
-Prior local logs: fast typed/motion/binding tests passed; real f32 model cases and
-C lifecycle passed. A fresh full reference qualification is still needed after
-all math changes. Do not assert current CI passed without inspecting its run.
+## Fresh checks on the recovered published source
 
-Derivative fast tests passed, but the opt-in `real_body_directions` test failed:
-Anny LBS and DQS and MakeHuman LBS passed; a later orientation case differed in
-`bone_poses` (~0.0096 vs central difference). Investigate exact rig/mode and
-SVD conditioning / reference-orientation semantics. Do not hide or relax the
-check without establishing the derivative contract. No post_gd wired yet.
+- `cargo test --workspace --locked`: 51 fast tests passed, 5 opt-in tests ignored.
+- `cargo test -p anny-core --release --locked --test differentiation -- --ignored --nocapture`:
+  all five real-model directional cases passed without relaxing the tolerance.
+  Maximum absolute JVP differences: Anny LBS 1.4741e-10, Anny DQS 1.0154e-7,
+  MakeHuman LBS 7.6424e-9, MakeHuman-Procrustes 1.5724e-9, SOMA LBS 1.4510e-9.
+- The old orientation mismatch was already fixed in the published shared
+  quaternion/Jacobi projection. The previous note calling it active is superseded.
+- These are local checks; do not infer all CI/platform/browser checks passed.
+- Original 23-case Python reference qualification still needs a fresh run.
+
+## Active next task
+
+Add a native optional Adam refinement stage using the verified parameter
+Jacobians and shape-prior derivatives. Preserve upstream rotation-vector,
+phenotype-logit, local/facial clamp and mean-square-loss semantics; explicitly
+document derivative conventions at piecewise boundaries. Do not call a finite-
+difference optimizer analytic or silently ignore unsupported options.
 
 ## Remaining current phase
 
-1. Qualify f32 and motion on the published commit, preserve f64 behavior.
-2. Fix/qualify analytic derivatives and wire native optional refinement.
-3. Remaining useful fitting experiments, aliases/helpers and language surfaces.
-4. Morph channels, texture/material authoring and animation import/roundtrip.
-5. Original 23 Python-reference cases, derivative/f32/motion/fitting/collision
-   cases; C/C# runtime and real browser smoke (not an editor).
-6. Update capability/qualification documents and remove delivery scaffolding.
+1. Complete and qualify native `post_gd` refinement and shared secondary access.
+2. Motion/AMASS workflow and fitting parity, aliases/helpers and binding coverage.
+3. Morph channels, texture/material authoring and animation import/roundtrip.
+4. Final f32, original Python forward-reference, derivative, fitting, collision,
+   C/C# runtime and actual browser smoke qualification (not a browser editor).
+5. Refresh capability docs and remove obsolete delivery/snapshot scaffolding.
 
 ## Later phase, explicitly deferred
 
