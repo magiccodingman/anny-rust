@@ -1,0 +1,5 @@
+{
+  "parts": ["native-io-000.b64", "native-io-010.b64", "native-io-011.b64", "native-io-012.b64", "native-io-013.b64"],
+  "sha256": "4479f8384f6adddd5df84dd9b3aac97342a19871f449386a8353eed8fb418e43",
+  "message": "Add native mesh IO, rigged glTF scenes and animations, and C/C#/WASM GLB export"
+}
