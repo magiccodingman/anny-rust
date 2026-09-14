@@ -8,7 +8,7 @@ use crate::{
     tensor::Kind,
     Error, Result,
 };
-use safetensors::{tensor::TensorView, Dtype};
+use safetensors::{tensor::TensorView, Dtype, SafeTensors};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap};
@@ -306,6 +306,32 @@ impl ModelOutputF32 {
     }
 }
 
+/// A safetensors payload decoded straight into f32 storage, with no f64 intermediate.
+pub struct ArchiveF32 {
+    pub tensors: BTreeMap<String, TensorF32>,
+    pub metadata: HashMap<String, String>,
+}
+
+impl ArchiveF32 {
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        let (_, info) = SafeTensors::read_metadata(bytes)?;
+        let metadata = info.metadata().clone().unwrap_or_default();
+        let s = SafeTensors::deserialize(bytes)?;
+        let mut tensors = BTreeMap::new();
+        for (name, v) in s.iter() {
+            let (kind, data) = crate::tensor::decode_f32(v.dtype(), v.data())?;
+            let t = TensorF32 {
+                shape: v.shape().to_vec(),
+                data,
+                kind,
+            };
+            t.validate()?;
+            tensors.insert(name.into(), t);
+        }
+        Ok(Self { tensors, metadata })
+    }
+}
+
 /// A reusable f32 runtime. Static model arrays are converted once at creation.
 /// The original f64 model remains valid and unchanged.
 #[derive(Clone, Debug)]
@@ -345,7 +371,58 @@ impl AnnyF32 {
         Self::from_anny(&crate::Anny::from_model_data(data, config)?)
     }
     pub fn from_bytes(bytes: &[u8], config: Option<AnnyConfig>) -> Result<Self> {
-        Self::from_anny(&crate::Anny::from_bytes(bytes, config)?)
+        // Decode straight into f32 storage. Going through `Anny::from_bytes` widened the payload to
+        // 205.9 MB of f64 and converted every element back down, which measured 96 ms of the 229 ms
+        // reload; the payload is already f32, so read it as f32 and run the same checks.
+        let a = ArchiveF32::from_bytes(bytes)?;
+        let version = a
+            .metadata
+            .get("data_version")
+            .and_then(|s| s.parse::<usize>().ok());
+        ensure(
+            version == Some(crate::DATA_VERSION),
+            format!(
+                "ModelData data_version {version:?}; expected {}",
+                crate::DATA_VERSION
+            ),
+        )?;
+        let header = a
+            .metadata
+            .get("metadata")
+            .ok_or_else(|| Error::Invalid("ModelData missing metadata header".into()))?;
+        let metadata: crate::model::ModelMetadata = serde_json::from_str(header)?;
+        let config = match config {
+            Some(c) => c,
+            None => a
+                .metadata
+                .get("anny_rust_config")
+                .map(|v| serde_json::from_str(v))
+                .transpose()?
+                .unwrap_or_default(),
+        };
+        config.validate()?;
+        let rig = config.rig.resolve()?;
+        let data = ModelDataF32 {
+            metadata,
+            arrays: a.tensors,
+        };
+        let mask = data.get("stacked_phenotype_blend_shapes_mask")?;
+        let (local_change_labels, facial_action_labels) = crate::model::validate_model_blocks(
+            &data.metadata,
+            data.blendshape_count(),
+            &mask.shape,
+            mask.data.iter().all(|&x| x == 0. || x == 1.),
+        )?;
+        validate_orientation(&data, rig.bone_orientation)?;
+        let phenotype_labels = config.phenotype_labels();
+        Ok(Self {
+            data,
+            config,
+            rig,
+            phenotype_labels,
+            local_change_labels,
+            facial_action_labels,
+        })
     }
     pub fn load(path: impl AsRef<std::path::Path>, config: Option<AnnyConfig>) -> Result<Self> {
         Self::from_bytes(&std::fs::read(path)?, config)

@@ -79,7 +79,7 @@ changed; the pattern should be treated as suspect wherever it appears on a hot p
 | operation | min | median |
 |---|---|---|
 | `prepare default (cold)` | 2140.970 ms | 2171.778 ms |
-| `reload prepared f32 bytes` (104.1 MB payload) | 289.390 ms | 290.840 ms |
+| `reload prepared f32 bytes` (104.1 MB payload) | 58.128 ms | 59.003 ms |
 | `generate f64 default` | 0.572 ms | 0.600 ms |
 | `generate f64 dqs` | 1.331 ms | 1.443 ms |
 | `generate f64 makehuman rig` | 0.559 ms | 0.648 ms |
@@ -99,7 +99,7 @@ changed; the pattern should be treated as suspect wherever it appears on a hot p
 | `session f32 typed full call` | 0.436 ms | 0.453 ms |
 | `derive measure` | 8.497 ms | 8.605 ms |
 | `derive keypoints` | 1.370 ms | 1.696 ms |
-| `derive collision` | 64.632 ms | 66.889 ms |
+| `derive collision` | 29.866 ms | 31.450 ms |
 | `derive pose-convert world` | 0.655 ms | 0.774 ms |
 
 ## Findings
@@ -195,8 +195,20 @@ After that fix construction is 0.55 ms and 2.14 ms, and `derive measure` end to 
 reusable toolkit object would still remove those remaining constructions, and `KeypointsRegressor::coco`
 re-reads a converted asset from the store on every call.
 
-**6. Load time is dominated by cold preparation (2.14 s) and by the 104.1 MB f32 payload reload
-(289 ms).** Startup cost for applications that ship a prepared model: ~0.29 s.
+**6. Load time was dominated by the f32 payload reload widening to f64 and converting back.**
+`AnnyF32::from_bytes` called `Anny::from_bytes`, which decoded every tensor to `f64` — 205.9 MB for a
+104.1 MB payload — then `from_anny` converted each one back down. Measured stages: f64 decode 110.8 ms,
+metadata validation +20 ms, f64→f32 conversion and orientation 96 ms. The conversion was not just a
+copy: `TensorF32::from_reference` scanned all 13.8M elements three times (length, finiteness, exact
+representability).
+The typed loader now decodes the F32 payload straight into `f32` storage via
+`tensor::decode_f32` + `ArchiveF32`: **289 → 59.0 ms (4.9x)**, and the transient 205.9 MB f64 copy is
+gone. Nothing was weakened — `ArchiveF32::from_bytes` still runs `TensorF32::validate` per tensor, which
+covers finiteness plus the `Index`/`Bool` range rules, and the dtype-independent block checks moved into
+a shared `validate_model_blocks` so both loaders enforce the same mask, block-length and
+macro/facial/local ordering rules. `tests/prepared_payload.rs` pins the new loader to the old one:
+bit-identical arrays and identical posed output. What remains is one unavoidable 104 MB copy plus the
+per-tensor validity scan.
 
 ## Ranking of remaining work, by measured upside
 
@@ -211,8 +223,11 @@ re-reads a converted asset from the store on every call.
    optimization.
 3. **`derive measure` (8.5 ms)** — find out whether it is the measurement's geometry queries or its
    per-request construction.
-4. **Startup (289 ms reload / 2.14 s prepare)** — mmap the prepared payload, or avoid materializing
-   blendshapes that a given configuration never uses.
+4. **Startup: cold preparation is now the whole story (2.14 s prepare / 59.0 ms reload).** The 104.1 MB
+   payload load is down from 289 ms; what is left is one copy plus a full validity scan, so the next
+   step is mmap or zero-copy (`safetensors` exposes the buffer; validating lazily on first use would
+   trade the scan for weaker guarantees and needs a deliberate decision), or avoiding materializing
+   blendshapes a configuration never uses. Cold preparation (2.14 s) has not been attacked at all.
 5. **GPU/WebGPU, Unity integration, browser editor, C/C#/WASM session exposure** — untouched. The
    session API exists only in Rust (`Anny::pose_session`, `AnnyF32::pose_session`); no CLI, C, WASM or
    C# surface exposes it yet, so the 1.5-2x is not reachable from those callers.

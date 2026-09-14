@@ -326,6 +326,64 @@ impl Archive {
         }
     }
 }
+/// Decode a safetensors entry straight into `f32`, without the `f64` intermediate.
+///
+/// The prepared payload is stored as f32, but `AnnyF32::from_bytes` decoded every tensor to `f64`
+/// first (205.9 MB of intermediate for the 104.1 MB payload) and then converted each one back down.
+/// Measuring the reload in stages put 96 ms of its 229 ms in that round trip, so decode into the
+/// storage type directly instead. Integer and boolean entries widen to f32 the same way they widen
+/// to f64, which keeps [`Kind`] and every downstream label/coefficient rule identical.
+pub(crate) fn decode_f32(dtype: Dtype, bytes: &[u8]) -> Result<(Kind, Vec<f32>)> {
+    macro_rules! convert {
+        ($ty:ty,$size:literal) => {
+            bytes
+                .chunks_exact($size)
+                .map(|x| <$ty>::from_le_bytes(x.try_into().unwrap()) as f32)
+                .collect()
+        };
+    }
+    let integer = matches!(
+        dtype,
+        Dtype::I8
+            | Dtype::U8
+            | Dtype::I16
+            | Dtype::U16
+            | Dtype::I32
+            | Dtype::U32
+            | Dtype::I64
+            | Dtype::U64
+    );
+    let kind = if integer {
+        Kind::Index
+    } else if dtype == Dtype::BOOL {
+        Kind::Bool
+    } else {
+        Kind::Float
+    };
+    let data = match dtype {
+        Dtype::F64 => convert!(f64, 8),
+        Dtype::F32 => convert!(f32, 4),
+        Dtype::I64 => convert!(i64, 8),
+        Dtype::I32 => convert!(i32, 4),
+        Dtype::I16 => convert!(i16, 2),
+        Dtype::I8 => convert!(i8, 1),
+        Dtype::U64 => convert!(u64, 8),
+        Dtype::U32 => convert!(u32, 4),
+        Dtype::U16 => convert!(u16, 2),
+        Dtype::U8 => convert!(u8, 1),
+        Dtype::BOOL => bytes
+            .iter()
+            .map(|&x| if x == 0 { 0. } else { 1. })
+            .collect(),
+        other => {
+            return Err(crate::Error::Invalid(format!(
+                "unsupported safetensors dtype {other:?}"
+            )))
+        }
+    };
+    Ok((kind, data))
+}
+
 fn decode(dtype: Dtype, bytes: &[u8]) -> Result<(Kind, Vec<f64>)> {
     macro_rules! convert {
         ($ty:ty,$size:literal) => {

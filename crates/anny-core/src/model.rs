@@ -33,6 +33,47 @@ pub struct ModelData {
     pub metadata: ModelMetadata,
     pub arrays: BTreeMap<String, Tensor>,
 }
+/// The dtype-independent half of model validation: mask shape and binarity, the block lengths against
+/// metadata, and the macro/facial/local ordering that the coefficient packing depends on.
+///
+/// `Anny::from_model_data` and `AnnyF32::from_bytes` both call this so a prepared payload is checked
+/// by exactly the rules a freshly built model is, rather than the typed loader trusting its bytes.
+pub(crate) fn validate_model_blocks(
+    metadata: &ModelMetadata,
+    blendshape_count: usize,
+    mask_shape: &[usize],
+    mask_is_binary: bool,
+) -> Result<(Vec<String>, Vec<String>)> {
+    ensure(
+        mask_shape.len() == 2 && mask_shape[1] == 26,
+        "phenotype mask must have 26 columns",
+    )?;
+    ensure(mask_is_binary, "phenotype mask must contain zero or one")?;
+    let local_change_labels = metadata.local_change_labels();
+    let facial_action_labels = metadata.facial_action_labels();
+    ensure(
+        mask_shape[0] + local_change_labels.len() * 2 + facial_action_labels.len()
+            == blendshape_count,
+        "blendshape blocks do not match metadata",
+    )?;
+    // Coefficient packing is part of the compatibility contract, not map order.
+    let m = mask_shape[0];
+    let f = facial_action_labels.len();
+    ensure(
+        metadata.blendshape_labels[..m]
+            .iter()
+            .all(|s| !s.starts_with("local_change:") && !s.starts_with("facial_action:"))
+            && metadata.blendshape_labels[m..m + f]
+                .iter()
+                .all(|s| s.starts_with("facial_action:"))
+            && metadata.blendshape_labels[m + f..]
+                .iter()
+                .all(|s| s.starts_with("local_change:")),
+        "blendshape blocks must be macro, facial, then paired local",
+    )?;
+    Ok((local_change_labels, facial_action_labels))
+}
+
 impl ModelData {
     pub fn get(&self, name: &str) -> Result<&Tensor> {
         self.arrays
@@ -263,35 +304,11 @@ impl Anny {
         config.validate()?;
         let rig = config.rig.resolve()?;
         let mask = data.get("stacked_phenotype_blend_shapes_mask")?;
-        ensure(
-            mask.shape.len() == 2 && mask.shape[1] == 26,
-            "phenotype mask must have 26 columns",
-        )?;
-        ensure(
+        let (local_change_labels, facial_action_labels) = validate_model_blocks(
+            &data.metadata,
+            data.blendshape_count(),
+            &mask.shape,
             mask.data.iter().all(|&x| x == 0. || x == 1.),
-            "phenotype mask must contain zero or one",
-        )?;
-        let local_change_labels = data.metadata.local_change_labels();
-        let facial_action_labels = data.metadata.facial_action_labels();
-        ensure(
-            mask.shape[0] + local_change_labels.len() * 2 + facial_action_labels.len()
-                == data.blendshape_count(),
-            "blendshape blocks do not match metadata",
-        )?;
-        // Coefficient packing is part of the compatibility contract, not map order.
-        let m = mask.shape[0];
-        let f = facial_action_labels.len();
-        ensure(
-            data.metadata.blendshape_labels[..m]
-                .iter()
-                .all(|s| !s.starts_with("local_change:") && !s.starts_with("facial_action:"))
-                && data.metadata.blendshape_labels[m..m + f]
-                    .iter()
-                    .all(|s| s.starts_with("facial_action:"))
-                && data.metadata.blendshape_labels[m + f..]
-                    .iter()
-                    .all(|s| s.starts_with("local_change:")),
-            "blendshape blocks must be macro, facial, then paired local",
         )?;
         validate_orientation(&data, rig.bone_orientation)?;
         let phenotype_labels = config.phenotype_labels();
