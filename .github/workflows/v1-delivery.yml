@@ -30,20 +30,19 @@ jobs:
           test "$(sha256sum "$RUNNER_TEMP/native.patch" | cut -d' ' -f1)" = "$expected"
           git apply --check "$RUNNER_TEMP/native.patch"
           git apply "$RUNNER_TEMP/native.patch"
-      - name: Validate native runtime and real interfaces
+      - name: Validate native f32 runtime and interfaces
         shell: bash
         run: |
           set -euo pipefail
           cargo fmt --all -- --check
-          rustfmt --edition 2021 --check crates/anny-core/src/runtime/math.rs crates/anny-core/src/runtime/evaluate.rs
           cargo test --workspace --locked
           cargo clippy --workspace --all-targets --locked -- -D warnings
           cargo check -p anny-wasm --target wasm32-unknown-unknown --locked
           cargo build --workspace --release --locked
           mkdir -p output
-          cc -std=c11 -Wall -Wextra -Werror -Iinclude examples/c_float_smoke.c -Ltarget/release -lanny_capi -lm -Wl,-rpath,"$PWD/target/release" -o output/c-float-smoke
-          ./output/c-float-smoke data
-          ./target/release/anny motion --assets data --source examples/motion.json --fps 6 --precision f32 --output output/motion32.glb
+          cc -std=c11 -Wall -Wextra -Werror -Iinclude examples/c_f32_smoke.c -Ltarget/release -lanny_capi -lm -Wl,-rpath,"$PWD/target/release" -o output/c-f32-smoke
+          ./output/c-f32-smoke data
+          ./target/release/anny generate --assets data --config examples/all.json --params examples/character.json --precision f32 --output output/character-f32.safetensors --mesh output/character-f32.glb --rigged true
       - name: Publish tested source on the requested branch only
         shell: bash
         run: |
@@ -53,6 +52,6 @@ jobs:
           test "$(git ls-remote origin refs/heads/codex/native-v1-completion | cut -f1)" = "$GITHUB_SHA"
           git config user.name 'Anny Rust port'
           git config user.email '131926685+magiccodingman@users.noreply.github.com'
-          git commit -m "Add true typed f32 runtime, native pose clips and landmark fitting initialization"
+          git commit -m "Add shared-equation native f32 runtime, typed language APIs and precision tests"
           git push origin HEAD:refs/heads/codex/native-v1-completion
           git rev-parse HEAD
