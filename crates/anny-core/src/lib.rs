@@ -58,3 +58,5 @@ pub mod motion;
 pub mod numpy;
 
 pub mod prior;
+
+pub mod refinement;

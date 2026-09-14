@@ -4,6 +4,7 @@
 //! increments (radians), with independent additive translations (meters).
 mod pairs;
 mod reverse;
+pub(crate) use reverse::vjp_at;
 pub use reverse::{vjp, ParameterSelection};
 
 use crate::{
