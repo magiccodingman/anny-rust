@@ -2,6 +2,9 @@
 //! materials, images, skins, morph targets, animation channels and metadata.
 //! Only glTF 2.0 without extensions and supported triangle geometry is accepted.
 //! Image payloads remain opaque PNG/JPEG bytes; no renderer is embedded.
+mod animation;
+pub use animation::{AnimationChannel, AnimationClip, AnimationPath, Interpolation};
+
 use crate::{
     ensure,
     mesh_io::{parse_gltf, Gltf},
@@ -158,6 +161,7 @@ impl GltfAsset {
         }
         let asset = Self { graph };
         asset.geometry()?;
+        asset.animation_clips()?;
         Ok(asset)
     }
     /// Read-only retained document. Returned values use glTF coordinates/indices.

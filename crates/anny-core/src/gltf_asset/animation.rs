@@ -176,7 +176,7 @@ impl AnimationChannel {
             for v in &mut out {
                 *v /= norm;
             }
-        };
+        }
         ensure(
             out.iter().all(|x| x.is_finite()),
             "non-finite animation result",
