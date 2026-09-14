@@ -56,3 +56,5 @@ pub use typed::{AnnyF32, ModelOutputF32, TensorF32};
 
 pub mod motion;
 pub mod numpy;
+
+pub mod prior;
