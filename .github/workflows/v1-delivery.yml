@@ -37,8 +37,9 @@ jobs:
           cargo check -p anny-wasm --target wasm32-unknown-unknown --locked
           cargo build --workspace --release --locked
           mkdir -p output
+          ./target/release/anny prepare --assets data --config examples/all.json --output output/f32-smoke-model.safetensors
           cc -std=c11 -Wall -Wextra -Werror -Iinclude examples/c_f32_smoke.c -Ltarget/release -lanny_capi -lm -Wl,-rpath,"$PWD/target/release" -o output/c-f32-smoke
-          ./output/c-f32-smoke data
+          ./output/c-f32-smoke output/f32-smoke-model.safetensors
           ./target/release/anny generate --assets data --config examples/all.json --params examples/character.json --precision f32 --output output/character-f32.safetensors --mesh output/character-f32.glb --rigged true
       - name: Publish tested source on the requested branch only
         shell: bash
