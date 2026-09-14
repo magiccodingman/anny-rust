@@ -49,14 +49,28 @@ try {
   const document = own(new GltfDocument(glb));
   const graph = JSON.parse(document.query('{"operation":"document"}'));
   const rootBone = graph.skins[0].joints[0];
-  const edits = [{op: 'set-material', mesh: 0, primitive: 0, material: {name: 'browser-material', roughness: 0.4}}, {op: 'add-animation', clip: {name: 'browser-clip', channels: [{node: rootBone, path: 'translation', interpolation: 'LINEAR', times: [0.1, 0.2], width: 3, values: [0,0,0, 0.1,0,0]}]}}];
+  const meshNode = graph.nodes.findIndex(n => n.mesh === 0);
+  const count = graph.accessors[graph.meshes[0].primitives[0].attributes.POSITION].count;
+  const png = Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNoaGgAAAMEAYFL09IQAAAAAElFTkSuQmCC'), c => c.charCodeAt(0));
+  const edits = [
+    {op: 'add-texture', bytes: png, options: {name: 'one-pixel-reference'}},
+    {op: 'set-material', mesh: 0, primitive: 0, material: {name: 'browser-material', roughness: 0.4, base_color_texture: {texture: 0}}},
+    {op: 'add-morph', mesh: 0, name: 'browser-morph', weight: 0.2, deltas: [{positions: Array.from({length: count}, () => [0.001, 0, 0])}]},
+    {op: 'add-animation', clip: {name: 'browser-clip', channels: [
+      {node: rootBone, path: 'translation', interpolation: 'LINEAR', times: [0.1, 0.2], width: 3, values: [0,0,0, 0.1,0,0]},
+      {node: meshNode, path: 'weights', interpolation: 'LINEAR', times: [0.1, 0.2], width: 1, values: [0, 1]}
+    ]}}
+  ];
   document.edit(JSON.stringify(edits));
   const authored = document.glb();
   const reimported = own(new GltfDocument(authored));
   const clips = JSON.parse(reimported.query('{"operation":"clips"}'));
   check(clips.length === 1 && clips[0].channels[0].times.length === 2, 'retained animation/material authoring round trip');
   const info = JSON.parse(reimported.query('{"operation":"describe"}'));
-  check(info.materials > 0 && info.skins === 1, 'authoring preserves rig');
+  check(info.materials > 0 && info.skins === 1 && info.images === 1, 'texture/morph authoring preserves rig');
+  const sampled = JSON.parse(reimported.query('{"operation":"geometry","animation":0,"time":0.15}'));
+  check(sampled.positions.length > 0 && sampled.positions.every(finite), 'skeletal and morph animation sampling');
+  window.__anny_authored_glb = authored;
   dispose(reimported); dispose(document);
   const prepared = model.prepared_bytes();
   dispose(output); dispose(model);

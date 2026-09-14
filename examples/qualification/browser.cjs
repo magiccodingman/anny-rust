@@ -32,6 +32,10 @@ let browser, server;
   await fs.mkdir(path.join(root, 'output'), {recursive: true});
   await fs.writeFile(path.join(root, 'output/browser-result.json'), JSON.stringify(result, null, 2));
   if (result.status !== 'passed' || pageErrors.length) process.exitCode = 1;
+  else {
+    const glb = await page.evaluate(() => Array.from(window.__anny_authored_glb));
+    await fs.writeFile(path.join(root, 'output/browser-authored.glb'), Buffer.from(glb));
+  }
 })().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => {
   if (browser) await browser.close();
   if (server) await new Promise(resolve => server.close(resolve));
