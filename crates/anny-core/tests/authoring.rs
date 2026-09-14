@@ -321,3 +321,275 @@ fn portable_secondary_requests_reject_unknown_options() -> Result<()> {
     );
     Ok(())
 }
+
+// ---------------------------------------------------------------------------
+// Pose transfer (upstream `anny.utils.pose.transfer_pose_parameters`)
+// ---------------------------------------------------------------------------
+
+/// Build a pose whose shared bones carry a deterministic rotation and translation.
+fn seeded_shared_pose(source: &Anny, shared: &[usize]) -> Tensor {
+    let mut pose = model::identity_poses(1, source.data.bone_count().max(1));
+    let mut state = 0x2545_f491_4f6c_dd1du64;
+    let mut next = move || {
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        (state >> 33) as f64 / ((1u64 << 31) as f64) - 1.0
+    };
+    for &index in shared {
+        let rotation = Vec3::new(next() * 0.3, next() * 0.3, next() * 0.3);
+        let translation = Vec3::new(next() * 0.05, next() * 0.05, next() * 0.05);
+        let start = index * 16;
+        write4(
+            &rigid(&rotvec(&rotation), &translation),
+            &mut pose.data[start..start + 16],
+        );
+    }
+    pose
+}
+
+fn shared_bone_indices(source: &Anny, target: &Anny) -> Result<Vec<usize>> {
+    target
+        .data
+        .metadata
+        .bone_labels
+        .iter()
+        .map(|label| {
+            source
+                .data
+                .metadata
+                .bone_labels
+                .iter()
+                .position(|name| name == label)
+                .ok_or_else(|| {
+                    Error::Invalid(format!(
+                        "target_model has bones absent from src_model: {label}"
+                    ))
+                })
+        })
+        .collect()
+}
+
+#[test]
+fn pose_transfer_between_identical_rigs_reproduces_the_pose_exactly() -> Result<()> {
+    let source = common::tiny();
+    let target = common::tiny();
+    let shared = shared_bone_indices(&source, &target)?;
+    assert_eq!(shared.len(), source.data.bone_count());
+    let parameters = Parameters {
+        phenotype_kwargs: serde_json::json!({"gender": 0.6, "age": 0.35}),
+        pose_parameters: seeded_shared_pose(&source, &shared).nested_json(),
+        ..Default::default()
+    };
+
+    let source_output = source.forward(&parameters)?;
+    let transferred = anny_core::tools::transfer_pose_parameters(
+        &source,
+        &target,
+        &parameters,
+        PoseParameterization::LocalRef,
+    )?;
+
+    // Identical rigs: the re-expressed parameters must equal the originals.
+    let expected = source.pose_parameters(&source_output, PoseParameterization::LocalRef)?;
+    assert_eq!(transferred.shape, expected.shape);
+    for (index, (actual, wanted)) in transferred.data.iter().zip(&expected.data).enumerate() {
+        assert!(
+            (actual - wanted).abs() < 1e-12,
+            "pose parameter {index}: {actual} vs {wanted}"
+        );
+    }
+
+    let target_output = target.forward(&Parameters {
+        phenotype_kwargs: parameters.phenotype_kwargs.clone(),
+        pose_parameters: transferred.nested_json(),
+        ..Default::default()
+    })?;
+    let (a, b) = (
+        source_output.get("vertices")?,
+        target_output.get("vertices")?,
+    );
+    assert_eq!(a.shape, b.shape);
+    let mut max = 0.0f64;
+    for (x, y) in a.data.iter().zip(&b.data) {
+        max = max.max((x - y).abs());
+    }
+    assert!(max < 1e-12, "pose transfer moved the mesh by {max:e}");
+    Ok(())
+}
+
+/// The config `common::tiny` is built with: the synthetic model has no cached
+/// orientation caches, so it must be reconstructed through the tail-based rig.
+fn tiny_config() -> AnnyConfig {
+    AnnyConfig {
+        rig: RigSpec::Name("makehuman".into()),
+        facial_actions: Selection::all(),
+        local_changes: Selection::all(),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn pose_transfer_rejects_bones_the_source_lacks() -> Result<()> {
+    let source = common::tiny();
+    let mut data = source.data.clone();
+    data.metadata.bone_labels = vec!["root".into(), "renamed".into()];
+    let target = Anny::from_model_data(data, tiny_config())?;
+    let error = anny_core::tools::transfer_pose_parameters(
+        &source,
+        &target,
+        &Parameters::default(),
+        PoseParameterization::LocalRef,
+    )
+    .expect_err("a target bone absent from the source rig must be rejected");
+    assert!(format!("{error}").contains("renamed"), "{error}");
+    Ok(())
+}
+
+#[test]
+fn pose_transfer_rejects_targets_with_a_different_rest_mesh() -> Result<()> {
+    let source = common::tiny();
+    let mut data = source.data.clone();
+    let mut vertices = data.get("template_vertices")?.clone();
+    vertices.data[0] += 0.5;
+    data.put("template_vertices", vertices);
+    let target = Anny::from_model_data(data, tiny_config())?;
+    let error = anny_core::tools::transfer_pose_parameters(
+        &source,
+        &target,
+        &Parameters::default(),
+        PoseParameterization::LocalRef,
+    )
+    .expect_err("differing rest meshes must be rejected");
+    assert!(format!("{error}").contains("rest"), "{error}");
+    Ok(())
+}
+
+#[ignore = "real pose-transfer check across rig variants; not part of the fast suite"]
+#[test]
+fn pose_transfer_between_real_rig_variants_reproduces_the_posed_mesh() -> Result<()> {
+    let store = assets::AssetStore::new(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data"),
+    );
+    let mut source_config = AnnyConfig::default();
+    source_config.rig = RigSpec::Name("makehuman".into());
+    source_config.local_changes = Selection::Preset("default".into());
+    source_config.facial_actions = Selection::all();
+    let mut target_config = source_config.clone();
+    target_config.rig = RigSpec::Name("anny".into());
+    let source = store.build(&source_config)?;
+    let target = store.build(&target_config)?;
+    eprintln!(
+        "source makehuman bones {} / target anny bones {}",
+        source.data.bone_count(),
+        target.data.bone_count()
+    );
+
+    let shared = shared_bone_indices(&source, &target)?;
+    let parameters = Parameters {
+        phenotype_kwargs: serde_json::json!({"gender": 0.62, "age": 0.37, "height": 0.55}),
+        pose_parameters: seeded_shared_pose(&source, &shared).nested_json(),
+        ..Default::default()
+    };
+
+    let source_output = source.forward(&parameters)?;
+    let transferred = anny_core::tools::transfer_pose_parameters(
+        &source,
+        &target,
+        &parameters,
+        PoseParameterization::LocalRef,
+    )?;
+    let target_output = target.forward(&Parameters {
+        phenotype_kwargs: parameters.phenotype_kwargs.clone(),
+        pose_parameters: transferred.nested_json(),
+        ..Default::default()
+    })?;
+
+    let (a, b) = (
+        source_output.get("vertices")?,
+        target_output.get("vertices")?,
+    );
+    assert_eq!(a.shape, b.shape);
+    let mut max = 0.0f64;
+    for (x, y) in a.data.iter().zip(&b.data) {
+        max = max.max((x - y).abs());
+    }
+    eprintln!(
+        "pose transfer makehuman->anny max vertex difference {max:e} over {} shared bones",
+        shared.len()
+    );
+    assert!(max < 1e-4, "{max:e}");
+    Ok(())
+}
+
+#[ignore = "real pose-transfer rejection check; not part of the fast suite"]
+#[test]
+fn pose_transfer_from_a_pruned_rig_to_a_full_rig_is_rejected() -> Result<()> {
+    let store = assets::AssetStore::new(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data"),
+    );
+    let mut source_config = AnnyConfig::default();
+    source_config.local_changes = Selection::Preset("default".into());
+    source_config.facial_actions = Selection::all();
+    let mut target_config = source_config.clone();
+    target_config.rig = RigSpec::Name("makehuman".into());
+    let source = store.build(&source_config)?;
+    let target = store.build(&target_config)?;
+    assert!(
+        target.data.bone_count() > source.data.bone_count(),
+        "expected the makehuman rig to retain bones the anny rig prunes"
+    );
+    let error = anny_core::tools::transfer_pose_parameters(
+        &source,
+        &target,
+        &Parameters::default(),
+        PoseParameterization::LocalRef,
+    )
+    .expect_err("target bones absent from the source rig must be rejected");
+    eprintln!("rejected as expected: {error}");
+    Ok(())
+}
+
+#[ignore = "real segmentation check; not part of the fast suite"]
+#[test]
+fn segmentation_selects_disjoint_body_parts() -> Result<()> {
+    let store = assets::AssetStore::new(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data"),
+    );
+    let model = store.build(&AnnyConfig::default())?;
+    let faces = model.data.get("faces")?.shape[0];
+    let head = store.segment_faces(&model.data, &["head"])?;
+    let hands = store.segment_faces(&model.data, &["hand.L", "hand.R"])?;
+    let everything = store.segment_faces(
+        &model.data,
+        &[
+            "head",
+            "hand.L",
+            "hand.R",
+            "foot.L",
+            "foot.R",
+            "tongue",
+            "mouth_cavity",
+        ],
+    )?;
+    eprintln!(
+        "faces {faces}: head {} / hands {} / union {}",
+        head.len(),
+        hands.len(),
+        everything.len()
+    );
+    for index in &head {
+        assert!(hands.binary_search(index).is_err(), "face {index} in both");
+        assert!(
+            everything.binary_search(index).is_ok(),
+            "face {index} missing"
+        );
+    }
+    assert!(!head.is_empty() && head.len() < faces);
+    let mut unique = head.clone();
+    unique.extend(&hands);
+    unique.sort_unstable();
+    unique.dedup();
+    assert_eq!(unique.len(), head.len() + hands.len());
+    Ok(())
+}
