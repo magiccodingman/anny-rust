@@ -529,12 +529,23 @@ pub struct AmassFitResult {
     pub clip: PoseClip,
     pub shape_error: Vec<f64>,
     pub frame_errors: Vec<Vec<f64>>,
+    /// Empty entries when the caller left refinement disabled; otherwise the
+    /// initial loss plus each native Adam step for that frame.
+    pub frame_refinement_losses: Vec<Vec<f64>>,
+    /// Refinement trace for the retained shape stage when refinement is enabled.
+    pub shape_refinement_losses: Vec<f64>,
     pub source_frame_indices: Vec<usize>,
 }
 /// Native two-stage shape-on-rest then warm-started pose fitting. Requires an
 /// explicitly supplied SMPL-X source model AND correspondence map; neither is
-/// downloaded. Pose correctives are evaluated by the source model. This is the
-/// finite-difference/registration baseline, without optional post_gd refinement.
+/// downloaded. Pose correctives are evaluated by the source model.
+///
+/// Caller fitting settings (including optional `post_gd` refinement, local/facial
+/// clamps, `max_delta` and excluded phenotypes) are carried into the pose stage.
+/// The pose stage replaces the phenotype initialization with the fitted shape,
+/// freezes phenotype optimization, drops multistart (it is a shape search) and
+/// disables the phenotype shape-prior term, since that term is constant while
+/// phenotypes are frozen.
 pub fn fit_amass(
     sequence: &AmassSequence,
     source: &SmplModel,
@@ -578,8 +589,12 @@ pub fn fit_amass(
             .nested_json(),
         optimize_phenotypes: false,
         max_n_iters: Some(options.pose_iterations),
-        ..Default::default()
+        ..options.shape.clone()
     };
+    // Pose-only stage: multistart searches the shape space, and the phenotype
+    // prior is constant (and rejected) while phenotypes are frozen.
+    initialization.multistart.clear();
+    initialization.post_gd_prior_weight = 0.;
     let mut clip = PoseClip {
         name: "AMASS fitted to Anny".into(),
         parameters: Parameters {
@@ -590,6 +605,7 @@ pub fn fit_amass(
         frames: Vec::new(),
     };
     let mut errors = Vec::new();
+    let mut refinement = Vec::new();
     for &frame in &source_frame_indices {
         let output = source.forward(&sequence.parameters(frame, source, false)?)?;
         let vertices = mapping.map(output.get("vertices")?, target.data.vertex_count())?;
@@ -599,6 +615,7 @@ pub fn fit_amass(
             .nested_json();
         initialization.initial_pose_parameters = pose.clone();
         errors.push(fit.mean_vertex_error);
+        refinement.push(fit.post_gd_losses.clone());
         clip.frames.push(PoseFrame {
             time: frame as f64 / fps,
             pose_parameters: pose,
@@ -609,6 +626,8 @@ pub fn fit_amass(
         clip,
         shape_error: shape.mean_vertex_error,
         frame_errors: errors,
+        frame_refinement_losses: refinement,
+        shape_refinement_losses: shape.post_gd_losses.clone(),
         source_frame_indices,
     })
 }

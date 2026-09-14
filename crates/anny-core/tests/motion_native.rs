@@ -334,6 +334,28 @@ fn optional_amass_fitter_runs_with_synthetic_supplied_source_and_explicit_map() 
     let vertices = Tensor::new(vec![1, 3, 3], vec![0., 0., 0., 1., 0., 0., 0., 0., 1.]).unwrap();
     assert_eq!(map.map(&vertices, 3).unwrap().data, vertices.data);
     assert!(VertexMap::Identity.map(&vertices, 4).is_err());
+    // Caller fitting/refinement settings must reach the per-frame pose stage
+    // while the phenotype stage stays frozen.
+    options.shape.post_gd = true;
+    options.shape.post_gd_steps = 2;
+    options.shape.post_gd_lr = 1e-2;
+    options.shape.post_gd_optimize_local_changes = true;
+    options.shape.post_gd_optimize_facial_actions = true;
+    options
+        .shape
+        .multistart
+        .insert("height".into(), vec![0.4, 0.6]);
+    let refined = fit_amass(&sequence, &source, &target, &VertexMap::Identity, &options).unwrap();
+    assert_eq!(refined.frame_refinement_losses.len(), 2);
+    assert_eq!(
+        refined.shape_refinement_losses.len(),
+        3,
+        "the retained shape stage honors caller refinement too"
+    );
+    for losses in &refined.frame_refinement_losses {
+        assert_eq!(losses.len(), 3, "initial loss plus two Adam steps");
+        assert!(losses.iter().all(|loss| loss.is_finite()));
+    }
     options.max_frames = 1;
     assert!(fit_amass(&sequence, &source, &target, &VertexMap::Identity, &options).is_err());
 }
