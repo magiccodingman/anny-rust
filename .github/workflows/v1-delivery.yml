@@ -22,10 +22,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = refs/heads/codex/native-v1-completion
-          while IFS= read -r part; do
-            [[ "$part" =~ ^[0-9]+\.b64$ ]] || exit 1
-            cat ".github/v1-delivery/$part"
-          done < <(jq -r '.parts[]' .github/v1-delivery/ready.json) | base64 --decode | gzip --decompress > "$RUNNER_TEMP/native.patch"
+          base64 --decode .github/v1-delivery/payload.b64 | gzip --decompress > "$RUNNER_TEMP/native.patch"
           expected=$(jq -r .sha256 .github/v1-delivery/ready.json)
           test "$(sha256sum "$RUNNER_TEMP/native.patch" | cut -d' ' -f1)" = "$expected"
           git apply --check "$RUNNER_TEMP/native.patch"
