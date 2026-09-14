@@ -108,7 +108,8 @@ impl ConditionalBetaDistribution {
 }
 /// Same calibrated distribution as upstream. The explicit, portable RNG is not
 /// PyTorch's RNG, so equal seeds do not promise identical Python sample sequences.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SimpleShapeDistribution {
     pub age_mapping: MorphologicalAgeMapping,
     pub boys: BTreeMap<String, ConditionalBetaDistribution>,
@@ -142,8 +143,11 @@ impl SimpleShapeDistribution {
     pub fn load(store: &AssetStore, model: &Anny) -> Result<Self> {
         let boys = store.converted("shape_calibration/boys.pth")?;
         let girls = store.converted("shape_calibration/girls.pth")?;
-        let age_mapping = MorphologicalAgeMapping::load(&boys)?;
-        let other = MorphologicalAgeMapping::load(&girls)?;
+        Self::from_archives(&boys, &girls, model)
+    }
+    pub fn from_archives(boys: &Archive, girls: &Archive, model: &Anny) -> Result<Self> {
+        let age_mapping = MorphologicalAgeMapping::load(boys)?;
+        let other = MorphologicalAgeMapping::load(girls)?;
         ensure(
             age_mapping.anny_age_anchors == other.anny_age_anchors
                 && age_mapping.morphological_age_anchors == other.morphological_age_anchors,
@@ -157,8 +161,8 @@ impl SimpleShapeDistribution {
         };
         Ok(Self {
             age_mapping,
-            boys: load(&boys)?,
-            girls: load(&girls)?,
+            boys: load(boys)?,
+            girls: load(girls)?,
             phenotype_labels: model.phenotype_labels.clone(),
         })
     }
@@ -199,7 +203,9 @@ impl SimpleShapeDistribution {
                         } else {
                             &self.girls
                         };
-                        d[name].sample(a, &mut rng)?
+                        d.get(name)
+                            .ok_or_else(|| Error::Invalid(format!("missing {name} calibration")))?
+                            .sample(a, &mut rng)?
                     }
                     _ => rng.uniform(),
                 };
@@ -223,7 +229,10 @@ impl SimpleShapeDistribution {
                 .boys
                 .get(key)
                 .ok_or_else(|| Error::Invalid(format!("missing {key} calibration")))?;
-            let g = &self.girls[key];
+            let g = self
+                .girls
+                .get(key)
+                .ok_or_else(|| Error::Invalid(format!("missing {key} calibration")))?;
             let x = value(key).clamp(1e-6, 1. - 1e-6);
             let a = (-gender).ln_1p() + b.log_probability(value("age"), x)?;
             let b = gender.ln() + g.log_probability(value("age"), x)?;

@@ -50,6 +50,45 @@ impl AnnyModel {
             scene.to_glb().map_err(js_error)?.as_slice(),
         ))
     }
+    /// Portable secondary API; request/response schemas match the native C API.
+    pub fn query(&self, request_json: &str) -> Result<String, JsValue> {
+        anny_core::operations::execute_json(&self.model, request_json).map_err(js_error)
+    }
+    pub fn transform(&self, operations_json: &str) -> Result<AnnyModel, JsValue> {
+        let operations =
+            serde_json::from_str::<Vec<anny_core::transforms::Transform>>(operations_json)
+                .map_err(js_error)?;
+        Ok(AnnyModel {
+            model: anny_core::transforms::apply_pipeline(&self.model, &operations)
+                .map_err(js_error)?,
+        })
+    }
+    pub fn prepared_bytes(&self) -> Result<js_sys::Uint8Array, JsValue> {
+        let bytes = self
+            .model
+            .data
+            .archive(Some(&self.model.config))
+            .and_then(|a| a.to_bytes())
+            .map_err(js_error)?;
+        Ok(js_sys::Uint8Array::from(bytes.as_slice()))
+    }
+    pub fn transfer_pose(
+        &self,
+        target: &AnnyModel,
+        parameters_json: &str,
+        mode: &str,
+    ) -> Result<String, JsValue> {
+        let params = serde_json::from_str(parameters_json).map_err(js_error)?;
+        let mode: anny_core::PoseParameterization =
+            serde_json::from_value(serde_json::json!(mode)).map_err(js_error)?;
+        let t =
+            anny_core::tools::transfer_pose_parameters(&self.model, &target.model, &params, mode)
+                .map_err(js_error)?;
+        Ok(
+            serde_json::json!({"pose_parameterization":mode,"pose_parameters":t.nested_json()})
+                .to_string(),
+        )
+    }
     pub fn describe(&self) -> String {
         self.model.describe().to_string()
     }

@@ -301,7 +301,7 @@ pub unsafe extern "C" fn anny_model_describe(
     })
 }
 /// # Safety
-/// s is null or a string allocated by anny_model_describe and not yet freed.
+/// s is null or a string allocated by this library and not yet freed.
 #[no_mangle]
 pub unsafe extern "C" fn anny_string_free(s: *mut c_char) {
     if !s.is_null() {
@@ -379,6 +379,174 @@ pub unsafe extern "C" fn anny_bytes_free(bytes: *mut AnnyBytes) {
     }
 }
 
+/// Execute a portable secondary request (measure/keypoints/pose/fit/sample/collision).
+/// # Safety
+/// model is live, request_json is NUL-terminated UTF-8, and out is writable.
+/// Returned text is owned by the caller and freed with anny_string_free.
+#[no_mangle]
+pub unsafe extern "C" fn anny_model_query(
+    model: *const AnnyModel,
+    request_json: *const c_char,
+    out: *mut *mut c_char,
+) -> i32 {
+    guard(|| {
+        if out.is_null() {
+            return Err("null text output".into());
+        }
+        unsafe {
+            *out = ptr::null_mut();
+        }
+        let m = unsafe { model.as_ref() }.ok_or("null model")?;
+        let result = anny_core::operations::execute_json(&m.model, unsafe { text(request_json)? })
+            .map_err(|e| e.to_string())?;
+        let result = CString::new(result).map_err(|e| e.to_string())?;
+        unsafe {
+            *out = result.into_raw();
+        }
+        Ok(())
+    })
+}
+/// Apply an explicit ModelData authoring pipeline to an independent model.
+/// # Safety
+/// model is live, operations_json is NUL-terminated UTF-8, out is writable and
+/// does not alias model storage. Existing model/views remain unchanged.
+#[no_mangle]
+pub unsafe extern "C" fn anny_model_transform(
+    model: *const AnnyModel,
+    operations_json: *const c_char,
+    out: *mut *mut AnnyModel,
+) -> i32 {
+    guard(|| {
+        if out.is_null() {
+            return Err("null model output".into());
+        }
+        unsafe {
+            *out = ptr::null_mut();
+        }
+        let m = unsafe { model.as_ref() }.ok_or("null model")?;
+        let operations = serde_json::from_str::<Vec<anny_core::transforms::Transform>>(unsafe {
+            text(operations_json)?
+        })
+        .map_err(|e| e.to_string())?;
+        let model = anny_core::transforms::apply_pipeline(&m.model, &operations)
+            .map_err(|e| e.to_string())?;
+        unsafe {
+            *out = Box::into_raw(Box::new(AnnyModel { model }));
+        }
+        Ok(())
+    })
+}
+/// Serialize a portable prepared model with its configuration.
+/// # Safety
+/// model is live and out points to writable handle storage.
+#[no_mangle]
+pub unsafe extern "C" fn anny_model_prepared_bytes(
+    model: *const AnnyModel,
+    out: *mut *mut AnnyBytes,
+) -> i32 {
+    guard(|| {
+        if out.is_null() {
+            return Err("null bytes output".into());
+        }
+        unsafe {
+            *out = ptr::null_mut();
+        }
+        let m = unsafe { model.as_ref() }.ok_or("null model")?;
+        let bytes = m
+            .model
+            .data
+            .archive(Some(&m.model.config))
+            .and_then(|a| a.to_bytes())
+            .map_err(|e| e.to_string())?;
+        unsafe {
+            *out = Box::into_raw(Box::new(AnnyBytes { bytes }));
+        }
+        Ok(())
+    })
+}
+/// Transfer pose between compatible rest meshes/rigs, returning parameter JSON.
+/// # Safety
+/// Both models are live (may be identical). Strings are NUL-terminated UTF-8,
+/// parameters_json may be null/default, and out points to writable text storage.
+#[no_mangle]
+pub unsafe extern "C" fn anny_model_transfer_pose(
+    source: *const AnnyModel,
+    target: *const AnnyModel,
+    parameters_json: *const c_char,
+    mode: *const c_char,
+    out: *mut *mut c_char,
+) -> i32 {
+    guard(|| {
+        if out.is_null() {
+            return Err("null text output".into());
+        }
+        unsafe {
+            *out = ptr::null_mut();
+        }
+        let a = unsafe { source.as_ref() }.ok_or("null source model")?;
+        let b = unsafe { target.as_ref() }.ok_or("null target model")?;
+        let params: Parameters = if parameters_json.is_null() {
+            Parameters::default()
+        } else {
+            serde_json::from_str(unsafe { text(parameters_json)? }).map_err(|e| e.to_string())?
+        };
+        let mode: anny_core::PoseParameterization =
+            serde_json::from_value(serde_json::json!(unsafe { text(mode)? }))
+                .map_err(|e| e.to_string())?;
+        let tensor = anny_core::tools::transfer_pose_parameters(&a.model, &b.model, &params, mode)
+            .map_err(|e| e.to_string())?;
+        let result=CString::new(serde_json::json!({"pose_parameterization":mode,"pose_parameters":tensor.nested_json()}).to_string()).map_err(|e|e.to_string())?;
+        unsafe {
+            *out = result.into_raw();
+        }
+        Ok(())
+    })
+}
+
+/// Construct with an optional filesystem cache (null disables, "auto" uses OS defaults).
+/// # Safety
+/// assets is NUL-terminated UTF-8, config/cache are null or valid UTF-8 strings,
+/// and out points to writable model-handle storage.
+#[no_mangle]
+pub unsafe extern "C" fn anny_model_build_cached(
+    assets: *const c_char,
+    config_json: *const c_char,
+    cache_directory: *const c_char,
+    out: *mut *mut AnnyModel,
+) -> i32 {
+    guard(|| {
+        if out.is_null() {
+            return Err("null model output".into());
+        }
+        unsafe {
+            *out = ptr::null_mut();
+        }
+        let config = unsafe { config(config_json)? }.unwrap_or_default();
+        let store = AssetStore::new(unsafe { text(assets)? });
+        let cache = if cache_directory.is_null() {
+            anny_core::cache::ModelCache::disabled()
+        } else {
+            match unsafe { text(cache_directory)? } {
+                "auto" => anny_core::cache::ModelCache::automatic().map_err(|e| e.to_string())?,
+                path => anny_core::cache::ModelCache::directory(path),
+            }
+        };
+        let result = cache
+            .load_or_build(&store, &config)
+            .map_err(|e| e.to_string())?;
+        unsafe {
+            *out = Box::into_raw(Box::new(AnnyModel {
+                model: result.model,
+            }));
+        }
+        Ok(())
+    })
+}
+
+#[cfg(test)]
+#[path = "../../anny-core/tests/common/mod.rs"]
+mod fixture;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -410,5 +578,51 @@ mod tests {
                 .unwrap(),
             "parent"
         );
+    }
+    #[test]
+    fn secondary_ownership_and_prepared_roundtrip() {
+        let model = Box::into_raw(Box::new(AnnyModel {
+            model: fixture::tiny(),
+        }));
+        let request = CString::new(r#"{"operation":"pose-convert","mode":"world"}"#).unwrap();
+        let mut result = ptr::null_mut();
+        assert_eq!(
+            unsafe { anny_model_query(model, request.as_ptr(), &mut result) },
+            0
+        );
+        let text = unsafe { CStr::from_ptr(result) }.to_str().unwrap();
+        assert!(text.contains("pose_parameters"));
+        unsafe {
+            anny_string_free(result);
+        }
+        let operations = CString::new(r#"[{"op":"triangulate"}]"#).unwrap();
+        let mut modified = ptr::null_mut();
+        assert_eq!(
+            unsafe { anny_model_transform(model, operations.as_ptr(), &mut modified) },
+            0
+        );
+        let mut bytes = ptr::null_mut();
+        assert_eq!(
+            unsafe { anny_model_prepared_bytes(modified, &mut bytes) },
+            0
+        );
+        let mut copy = ptr::null_mut();
+        assert_eq!(
+            unsafe {
+                anny_model_from_bytes(
+                    anny_bytes_data(bytes),
+                    anny_bytes_len(bytes),
+                    ptr::null(),
+                    &mut copy,
+                )
+            },
+            0
+        );
+        unsafe {
+            anny_bytes_free(bytes);
+            anny_model_free(modified);
+            anny_model_free(copy);
+            anny_model_free(model);
+        }
     }
 }

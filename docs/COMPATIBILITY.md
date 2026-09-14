@@ -41,6 +41,14 @@ the full/reference cases is replaced with a synthetic body or placeholder mesh.
 | C# example | .NET 10 P/Invoke/SafeHandle wrapper and managed output copies | Build in CI; not a Unity integration package |
 | WASM | In-memory prepared model, same geometry core, typed-array outputs | Target compilation checked; browser UI/performance not independently qualified |
 
+## Native authoring extension
+
+See [AUTHORING.md](AUTHORING.md) for transforms, covariance and skin-weight bakes,
+checksummed caching, ordinary-mesh fitting, and the shared secondary binding API.
+See [SCENES_AND_MESH_IO.md](SCENES_AND_MESH_IO.md) for rigged GLB scenes and formats.
+Native `.pth`/`.pt` import replaces the previously required conversion interpreter.
+These additions do not imply completion of the remaining boundaries below.
+
 ## Explicit differences and unfinished surfaces
 
 1. **Automatic differentiation, PyTorch tensor APIs, Warp/CUDA/GPU acceleration,
@@ -60,24 +68,27 @@ the full/reference cases is replaced with a synthetic body or placeholder mesh.
    root-bound instead of carrying upstream NaN weights. Referenced default
    topology is unchanged. Do not call this intentional hardening byte-identical
    behavior for every unused helper vertex.
-6. Ordinary model construction and retopology are native. Some research/precompute
-   convenience utilities in upstream `model_transforms.py`, external mesh-fitting
-   workflows, example plotting, and dedicated skin-weight recomputation scripts
-   have no standalone Rust equivalent yet. Their full Python API is not claimed.
+6. ModelData transforms, skin-weight cleanup, both covariance bakes, and a local
+   closest-surface fitting workflow are now native authoring tools. External
+   AMASS/SMPL fitting workflows, global scan registration, plotting/comparison
+   programs, and authored SOMA-X RBF generation are not fully replicated. Generic
+   rig pruning still explicitly rejects runtime-Procrustes/SOMA-refiner data until
+   an appropriate cached rig is prepared. See the authoring documentation.
 7. SMPL/SMPL-X licensed models and noncommercial correspondence maps are not
    downloaded or bundled. `tools/export_smpl.py` is an explicit offline preparation
    bridge. Real asset validation remains pending; the adapter is not evidence of
    full third-party library compatibility.
-8. C API ABI 1 and WASM expose model construction/loading and evaluation; not every
-   secondary fitting/research helper is exposed over every language binding.
-   Rust callers can use the native secondary modules directly.
+8. C API ABI 1 and WASM now also expose secondary requests, model transforms,
+   prepared bytes, pose transfer, and GLB export. Filesystem-specific import and
+   preprocessing orchestration remains native CLI/Rust tooling; browser hosts
+   provide bytes themselves. A dedicated Unity package is not supplied.
 9. Internal arrays are f64 reference arrays and no unsafe code is permitted in
    `anny-core`. There is no promise of float16/float32 output-type parity, SIMD/GPU
    throughput, identical Python cache filenames, or identical exception wording.
    Source-specific f32 projection and rig-roll steps are deliberately reproduced.
-10. `prepare` is an explicit cache-generation step. Loading an existing prepared
-    model is supported; Python's implicit cache directory/hash protocol is not
-    replicated. Loading corrupt or incompatible data returns errors.
+10. `prepare` remains explicit. Optional automatic native disk caching now exists
+    with content-addressed keys and checksum verification; Python's exact cache
+    directory/hash protocol is not replicated. Corrupt/incompatible caches fail.
 
 ## Numerical details deliberately preserved
 

@@ -1,4 +1,5 @@
 //! Thin command-line adapter; all model evaluation lives in anny-core.
+mod authoring;
 use anny_core::{
     assets::AssetStore,
     model::{Anny, Parameters},
@@ -32,10 +33,16 @@ fn model(opts: &BTreeMap<String, String>) -> Result<Anny> {
         return Err(error("use --model OR --assets, not both"));
     }
     if let Some(path) = opts.get("model") {
+        if opts.contains_key("cache-dir") {
+            return Err(error("--cache-dir is only for asset construction"));
+        }
         Anny::load(path, config(opts)?)
     } else {
-        AssetStore::new(opts.get("assets").cloned().unwrap_or_else(|| "data".into()))
-            .build(&config(opts)?.unwrap_or_default())
+        authoring::cached_model(
+            AssetStore::new(opts.get("assets").cloned().unwrap_or_else(|| "data".into())),
+            config(opts)?.unwrap_or_default(),
+            opts.get("cache-dir"),
+        )
     }
 }
 fn required<'a>(opts: &'a BTreeMap<String, String>, key: &str) -> Result<&'a str> {
@@ -125,6 +132,7 @@ fn run() -> Result<()> {
     let command = args.next().unwrap_or_else(|| "help".into());
     if ["help", "--help", "-h"].contains(&command.as_str()) {
         println!("anny <prepare|generate|inspect|compare|measure|sample|fit|import-upstream|verify-assets> [options]\n\nimport-upstream --source UPSTREAM_CHECKOUT --destination NEW_DIRECTORY\n                [--allow-revision-mismatch true]\nverify-assets --assets data\nprepare --assets data [--config config.json] --output model.safetensors\ngenerate (--assets data | --model model.safetensors) [--config config.json]\n         [--params params.json] [--obj mesh.obj] [--output output.safetensors]\n         [--mesh character.glb] [--rigged true|false]\nlineup --assets data [--config config.json] --params lineup.json --output scene.glb\nmesh-convert --source input.obj --destination output.ply\ninspect (--assets data | --model model.safetensors) [--config config.json]\ncompare --actual output.safetensors --expected reference.safetensors\n        [--atol 0.000001] [--rtol 0] [--report report.json]\n\nmeasure (--assets data | --model model.safetensors) [--params params.json]\nsample --assets data [--config config.json] [--options sample-options.json] --output params.json\nfit (--assets data | --model model.safetensors) --target target.safetensors\n    [--options fit-options.json] [--inverter-options inverter-options.json] --output fitted.json\n\nInputs, matrices, and output arrays are row-major. OBJ uses upstream Z-up meters.");
+        authoring::help();
         return Ok(());
     }
     let allowed: BTreeSet<_> = [
@@ -147,6 +155,14 @@ fn run() -> Result<()> {
         "target",
         "mesh",
         "rigged",
+        "cache-dir",
+        "rig",
+        "operations",
+        "request",
+        "mesh-fit-options",
+        "correspondence",
+        "iterations",
+        "warmup",
     ]
     .into_iter()
     .collect();
@@ -164,6 +180,9 @@ fn run() -> Result<()> {
         if opts.insert(key.into(), value).is_some() {
             return Err(error(format!("duplicate {flag}")));
         }
+    }
+    if authoring::run(&command, &opts)? {
+        return Ok(());
     }
     match command.as_str() {
         "import-upstream" => {
@@ -241,6 +260,12 @@ fn run() -> Result<()> {
             );
         }
         "fit" => {
+            if !required(&opts, "target")?.ends_with(".safetensors") {
+                return authoring::fit_file(&opts);
+            }
+            if opts.contains_key("correspondence") || opts.contains_key("mesh-fit-options") {
+                return Err(error("Safetensors fit already uses paired vertex correspondence; use --options/--inverter-options"));
+            }
             let m = model(&opts)?;
             let target = Archive::load(required(&opts, "target")?)?;
             let setup = opts

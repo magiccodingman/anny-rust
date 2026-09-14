@@ -41,3 +41,11 @@ pub(crate) fn ensure(condition: bool, message: impl Into<String>) -> Result<()> 
         Err(Error::Invalid(message.into()))
     }
 }
+
+pub mod transforms;
+
+pub mod cache;
+pub mod fitting;
+pub mod precompute;
+
+pub mod operations;

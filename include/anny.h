@@ -36,6 +36,13 @@ int32_t anny_model_export_glb(const AnnyModel *model,const char *parameters_json
 const uint8_t *anny_bytes_data(const AnnyBytes *bytes);
 size_t anny_bytes_len(const AnnyBytes *bytes);
 void anny_bytes_free(AnnyBytes *bytes);
+/* Secondary operations use docs/AUTHORING.md request schemas. Query/transfer
+ * text is freed with anny_string_free; transformed models are independently owned. */
+int32_t anny_model_build_cached(const char *assets,const char *config_json,const char *cache_directory,AnnyModel **out);
+int32_t anny_model_query(const AnnyModel *model,const char *request_json,char **out);
+int32_t anny_model_transform(const AnnyModel *model,const char *operations_json,AnnyModel **out);
+int32_t anny_model_prepared_bytes(const AnnyModel *model,AnnyBytes **out);
+int32_t anny_model_transfer_pose(const AnnyModel *source,const AnnyModel *target,const char *parameters_json,const char *mode,char **out);
 #ifdef __cplusplus
 }
 #endif

@@ -1,0 +1,4 @@
+[
+  {"op":"triangulate"},
+  {"op":"compact-skinning-weights"}
+]

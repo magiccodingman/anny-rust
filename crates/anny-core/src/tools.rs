@@ -92,7 +92,8 @@ impl Anthropometry {
         Ok(result)
     }
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct KeypointsRegressor {
     pub labels: Vec<String>,
     pub weights: Tensor,

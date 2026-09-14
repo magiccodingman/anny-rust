@@ -908,6 +908,11 @@ impl Gltf {
             }
         }
         let mut out = SurfaceMesh::default();
+        let mesh_instances = nodes
+            .iter()
+            .enumerate()
+            .filter(|(i, n)| selected[*i] && n.get("mesh").is_some())
+            .count();
         for (i, node) in nodes.iter().enumerate() {
             if !selected[i] || node.get("mesh").is_none() {
                 continue;
@@ -929,6 +934,19 @@ impl Gltf {
                 let attr = &primitive["attributes"];
                 let mut pos = self.accessor(usize_field(attr, "POSITION")?, 3)?;
                 let n = pos.len() / 3;
+                if mesh_instances == 1 && primitives.len() == 1 {
+                    if let Some(map) = mesh
+                        .get("extras")
+                        .and_then(|e| e.get("sourceVertexIndices"))
+                    {
+                        let ids: Vec<u32> = serde_json::from_value(map.clone())?;
+                        ensure(
+                            ids.len() == n && ids.iter().all(|&id| (id as usize) < MAX_VERTICES),
+                            "invalid source vertex map",
+                        )?;
+                        out.source_vertex_indices = ids;
+                    }
+                }
                 if let Some(targets) = primitive.get("targets").and_then(Value::as_array) {
                     let weights = node
                         .get("weights")
@@ -1001,6 +1019,24 @@ impl Gltf {
                         sets.push((ids, ws));
                     }
                     ensure(!sets.is_empty(), "skinned primitive has no weights")?;
+                    for key in attr
+                        .as_object()
+                        .ok_or_else(|| bad("invalid primitive attributes"))?
+                        .keys()
+                    {
+                        if let Some(s) = key
+                            .strip_prefix("JOINTS_")
+                            .or_else(|| key.strip_prefix("WEIGHTS_"))
+                        {
+                            let set = s
+                                .parse::<usize>()
+                                .map_err(|_| bad("invalid skin attribute set"))?;
+                            ensure(
+                                set < sets.len(),
+                                "skin attribute sets must be paired and consecutive (maximum 64)",
+                            )?;
+                        }
+                    }
                     for v in 0..n {
                         let p = vec3(&pos[v * 3..v * 3 + 3]);
                         let mut result = Vec3::zeros();

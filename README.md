@@ -1,5 +1,15 @@
 # anny-rust
 
+**Native extension:** this branch now includes native tensor import, rigged GLB/glTF
+scenes and animation, OBJ/PLY/STL/glTF geometry I/O, authoring transforms, covariance
+and skin-weight preprocessing, optional checksummed caching, normal-mesh fitting,
+and secondary C/C#/WASM APIs. See [Authoring](docs/AUTHORING.md) and
+[Scenes and mesh I/O](docs/SCENES_AND_MESH_IO.md).
+
+A normal checkout uses the committed `data/` directly: **no Python installation
+is needed**. The older Python helpers are optional upstream-reference utilities.
+
+
 **The data payload is now included. No Python setup is needed to build or generate.**
 Native import from untouched upstream tensor archives is also available; see
 [Native import](docs/NATIVE_IMPORT.md). The older Python importer below is an
@@ -47,39 +57,29 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 The small test suite uses synthetic data and does not need Anny's asset payload,
 Python, a GPU, network downloads at runtime, or a full benchmark service.
 
-## Import your existing Anny assets
+## Import an untouched upstream checkout (optional)
 
-Run this using the Python environment that already runs the original Anny. It
-needs `torch`, `safetensors`, and `pyyaml` for this preparation step only.
+The asset payload is already committed; skip this for normal use. To import a
+fresh copy using only Rust, build the CLI and use a **new destination**:
 
 ```sh
-cd /home/slurp/Source/MagicCodingMan/anny-rust
-python -c 'import torch, safetensors, yaml; print("Asset converter dependencies OK")'
-python tools/import_assets.py \
+cargo build --release -p anny-cli --locked
+./target/release/anny import-upstream \
   --source /home/slurp/Source/Not_Saved/anny \
-  --destination data
+  --destination output/imported-data
+./target/release/anny verify-assets --assets output/imported-data
 ```
 
-This copies **the complete `src/anny/data/` hierarchy**, including OBJ, target.gz,
-rig/weight JSON, facial targets, segmentation, cached rig tensors and licenses.
-It writes converted `.pth.safetensors`/`.pt.safetensors` and `.yaml.json` siblings,
-plus a SHA-256 import manifest. Rust uses those portable siblings; it never loads
-pickle or invokes Python. The tested payload was about 145 MiB after conversion.
+The native importer copies the complete `src/anny/data/` hierarchy, converts the
+restricted tensor-archive formats actually used by the pinned source, converts
+YAML metadata, and writes a source/hash manifest. It never executes pickle globals
+or starts Python. See [Native import](docs/NATIVE_IMPORT.md) for its supported
+format subset and errors. The source checkout is read-only.
 
-The importer rejects a different upstream commit by default. Do not overwrite or
-reset an original checkout containing your own work. Create a detached worktree
-for the tested revision instead, then pass that worktree as `--source`:
-
-```sh
-git -C /home/slurp/Source/Not_Saved/anny fetch origin 81ca83e202273b306205c1cc15f33734be31e48c
-git -C /home/slurp/Source/Not_Saved/anny worktree add --detach \
-  /home/slurp/Source/Not_Saved/anny-reference-81ca83e \
-  81ca83e202273b306205c1cc15f33734be31e48c
-```
-
-`--allow-revision-mismatch` is available for deliberate experiments, not for
-claiming compatibility with the pinned reference. Use a fresh destination for a
-different source revision. Import does not automatically download SMPL assets.
+The expected revision is `81ca83e202273b306205c1cc15f33734be31e48c`. Do not reset
+an original checkout containing edits. A detached worktree can supply the pinned
+source without disturbing it. External SMPL/SMPL-X downloads are neither requested
+nor bundled.
 
 ## Generate a character
 
