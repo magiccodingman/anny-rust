@@ -1,0 +1,51 @@
+# Temporary recovery delivery; removed before handoff.
+name: Recover native completeness source
+on:
+  push:
+    branches: [codex/native-v1-completion]
+    paths: [.github/recovery/ready.json]
+permissions:
+  contents: write
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Validate and publish exact recovered source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/codex/native-v1-completion
+          cat .github/recovery/[0-9][0-9][0-9].b64 | base64 --decode > "$RUNNER_TEMP/checkpoint.xz"
+          expected=$(jq -r .sha256 .github/recovery/ready.json)
+          echo "$expected  $RUNNER_TEMP/checkpoint.xz" | sha256sum --check
+          xz --decompress --stdout "$RUNNER_TEMP/checkpoint.xz" > "$RUNNER_TEMP/checkpoint.patch"
+          git apply --check "$RUNNER_TEMP/checkpoint.patch"
+          git apply "$RUNNER_TEMP/checkpoint.patch"
+          git add -- crates docs examples include
+          if git diff --cached --name-only | grep -E '^(data/|tools/|\.github/)'; then exit 1; fi
+          test "$(git ls-remote origin refs/heads/codex/native-v1-completion | cut -f1)" = "$GITHUB_SHA"
+          git config user.name 'Anny Rust port'
+          git config user.email '131926685+magiccodingman@users.noreply.github.com'
+          git commit -m "Checkpoint typed f32 runtime, native motion, landmark initialization and WIP derivatives"
+          git push origin HEAD:refs/heads/codex/native-v1-completion
+          git rev-parse HEAD
+      - uses: dtolnay/rust-toolchain@1.90.0
+        with:
+          targets: wasm32-unknown-unknown
+          components: rustfmt, clippy
+      - name: Qualify recovered checkpoint (derivative real-data gap remains documented)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --all -- --check
+          cargo test --workspace --locked
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+          cargo check -p anny-wasm --target wasm32-unknown-unknown --locked
+          cargo build --workspace --release --locked
+          mkdir -p output
+          cc -std=c11 -Wall -Wextra -Werror -Iinclude examples/c_float_smoke.c -Ltarget/release -lanny_capi -lm -Wl,-rpath,"$PWD/target/release" -o output/c-float-smoke
+          ./output/c-float-smoke data
+          ./target/release/anny motion --assets data --source examples/motion.json --fps 6 --precision f32 --output output/motion32.glb
