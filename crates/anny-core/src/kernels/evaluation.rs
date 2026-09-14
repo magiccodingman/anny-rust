@@ -413,25 +413,84 @@ pub fn forward_model(
     skinning: SkinningMethod,
     return_bone_ends: bool,
 ) -> Result<ModelOutput> {
-    let mut out = rest_model(d, rig, coeffs)?;
+    let out = rest_model(d, rig, coeffs)?;
+    pose_model(d, rig, out, pose, mode, skinning, return_bone_ends)
+}
+/// Take an output buffer for reuse when its shape already matches, otherwise allocate.
+///
+/// A pose-only update reproduces the same shapes call after call, so stealing the previous buffer
+/// keeps the animating path allocation-free. The buffer is zeroed because callers rely on
+/// `Tensor::zeros` semantics.
+fn reusable_buffer(out: &mut ModelOutput, key: &str, shape: Vec<usize>) -> Tensor {
+    match out.arrays.remove(key) {
+        Some(mut existing) if existing.shape == shape => {
+            existing.data.fill(0.);
+            existing
+        }
+        _ => Tensor::zeros(shape),
+    }
+}
+/// Reuse an output buffer for bone poses, re-initialised to identity.
+///
+/// The pose loop overwrites the matrices it has poses for; starting from identity (as
+/// `identity_poses` does) keeps the result identical whether the buffer was reused or new.
+fn reusable_identity(out: &mut ModelOutput, key: &str, b: usize, j: usize) -> Tensor {
+    // Bone poses are [b, j, 4, 4], matching `identity_poses`; the rank is load-bearing because
+    // consumers such as `scene::selected` validate the trailing dimensions.
+    let mut t = reusable_buffer(out, key, vec![b, j, 4, 4]);
+    let identity = identity_poses(1, j);
+    for bi in 0..b {
+        t.data[bi * j * 16..(bi + 1) * j * 16].copy_from_slice(&identity.data);
+    }
+    t
+}
+/// Evaluate a pose against an already-built rest model.
+///
+/// This is the pose-dependent half of [`forward_model`]. It is separate so that a caller who keeps
+/// the phenotype/local-change coefficients fixed (animation, re-posing, editor sliders) can reuse
+/// the rest model instead of rebuilding it on every update; see `Anny::pose_session`.
+///
+/// `out` must be the output of [`rest_model`] for the same coefficients, and it is consumed so the
+/// rest arrays it already holds are carried into the returned output rather than recomputed.
+pub fn pose_model(
+    d: &ModelData,
+    rig: &RigConfig,
+    mut out: ModelOutput,
+    pose: &Value,
+    mode: PoseParameterization,
+    skinning: SkinningMethod,
+    return_bone_ends: bool,
+) -> Result<ModelOutput> {
     let deltas = parse_pose(pose, &d.metadata.bone_labels)?;
-    let br = coeffs.shape[0];
+    let br = out.get("rest_bone_poses")?.shape[0];
     let b = broadcast(&[br, deltas.shape[0]])?;
     let j = d.bone_count();
     let n = d.vertex_count();
-    let mut posed = Tensor::zeros(vec![b, n, 3]);
-    let mut bones = identity_poses(b, j);
+    // Acquire every output buffer before the rest arrays are borrowed, so the borrow checker stays
+    // happy without cloning and a repeated update reuses its previous buffers.
+    let mut posed = reusable_buffer(&mut out, "vertices", vec![b, n, 3]);
+    let mut bones = reusable_identity(&mut out, "bone_poses", b, j);
+    let ends_buffers = if return_bone_ends {
+        Some((
+            reusable_buffer(&mut out, "bone_heads", vec![b, j, 3]),
+            reusable_buffer(&mut out, "bone_tails", vec![b, j, 3]),
+        ))
+    } else {
+        out.arrays.remove("bone_heads");
+        out.arrays.remove("bone_tails");
+        None
+    };
     let weights = d.get("vertex_bone_weights")?;
     let ids = d.get("vertex_bone_indices")?;
     let k = weights.shape[1];
     let rest = out.get("rest_vertices")?;
     let restposes = out.get("rest_bone_poses")?;
-    let mut ends = if return_bone_ends {
+    let mut ends = if let Some(buffers) = ends_buffers {
         ensure(
             rig.bone_orientation == BoneOrientation::Blender,
             "bone ends require blender/tail orientation",
         )?;
-        Some((Tensor::zeros(vec![b, j, 3]), Tensor::zeros(vec![b, j, 3])))
+        Some(buffers)
     } else {
         None
     };
