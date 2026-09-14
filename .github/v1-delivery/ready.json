@@ -2,5 +2,5 @@
   "sha256": "c245fe180123cb96b1265996762bffbf3c8d291f2cf4aa83010b1d7852867283",
   "local_commit": "dfdc8c9",
   "description": "Shared-equation native f32 runtime, typed language APIs and precision tests",
-  "attempt": 2
+  "attempt": 3
 }
