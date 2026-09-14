@@ -1,7 +1,0 @@
-{
-  "sha256": "6152b46e1b0083dde1d72d50ad4514dca54fc72bc5862e2224bb2b7ac6d9a5ef",
-  "local_commit": "8ed708c370fd64c170dd08dfe41fe25da98a3a9d",
-  "description": "Typed f32 runtime, native motion, landmark alignment and explicitly unfinished analytic derivative implementation",
-  "parts": 10,
-  "known_unfinished": "Opt-in real-body JVP test fails on an orientation case; not claimed qualified; see docs/ACTIVE_WORK.md"
-}
