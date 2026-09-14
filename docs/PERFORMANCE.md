@@ -66,16 +66,21 @@ and it did not go the way the earlier guess assumed:
 | `generate f64 default` (whole call) | 9.021 ms | 9.440 ms | 100% |
 | `split coefficients default` | 0.013 ms | 0.013 ms | 0.1% |
 | `split rest_model default` | 8.421 ms | 8.593 ms | 93.3% |
-| `session build (coefficients + rest)` | 8.551 ms | 8.753 ms | — |
-| `session update pose (reused rest)` | **0.281 ms** | **0.288 ms** | **3.1%** |
+| `session build (coefficients + rest)` | 8.551–9.214 ms | 8.753–9.307 ms | — |
+| `session update pose (reused rest)` | **0.281–0.282 ms** | **0.288–0.303 ms** | **3.1%** |
+| `session f32 typed update pose` | **0.275 ms** | **0.280 ms** | — |
+| `session f32 typed full call` | 7.970 ms | 8.079 ms | 100% |
+
+(the ranges are run-to-run spread on the same host, not different builds)
 
 So the fixed 9.1 ms is **the rest model, not coefficients and not allocation**: coefficients are 0.1%
 of the call, which is two orders of magnitude below the earlier "per-call allocations behind the
 9.1 ms" hypothesis. That hypothesis was wrong and is corrected here.
 
-**Measured result: 0.281 ms per pose update against 9.021 ms per full call — a 32x reduction, 8.74 ms
-saved per update.** Building a session costs 8.551 ms, so it breaks even after **one** update; every
-further pose costs 0.281 ms. At 0.281 ms an update runs ~3,500 times per second single-threaded,
+**Measured result: 0.281 ms per pose update against 9.021–9.721 ms per full call — a 32x reduction,
+8.74 ms saved per update.** On the typed f32 path that a game actually calls it is **0.275 ms against
+7.970 ms — 29x**. Building a session costs ~8.6–9.2 ms, so it breaks even after **one** update; every
+further pose costs ~0.28 ms. At 0.28 ms an update runs ~3,500 times per second single-threaded,
 which is not the bottleneck for a 60 Hz editor or animation loop.
 
 Equivalence is asserted, not assumed: `crates/anny-core/tests/pose_session.rs` compares
@@ -83,12 +88,13 @@ Equivalence is asserted, not assumed: `crates/anny-core/tests/pose_session.rs` c
 parameterizations, batch sizes (including changing the batch size between updates), the
 `return_bone_ends` setting, and after a rejected pose, and requires **exact** equality (max difference
 `0.0`), because the session runs the same code on the same coefficients and a tolerance would hide a
-real divergence. On the committed 13,718-vertex / 104-bone model over 8 poses the maximum difference
-is likewise `0e0`.
+real divergence. The typed f32 session is checked the same way, bit for bit. On the committed
+13,718-vertex / 104-bone model over 8 poses the maximum difference is `0e0` on both paths.
 
-The f64 path is done. **`AnnyF32` still has no session**, so the typed path games and the Unity/WASM
-surfaces would actually use still pays the full 8 ms per pose update. That is the next step, and it is
-mechanical: `AnnyF32::rest_model`/`forward` already call the same generic kernels.
+Both paths are done. The remaining gap is the **product surfaces**: nothing above `anny-core` exposes a
+session yet, so a Unity or WASM caller still has to call `forward` per pose. Wiring the session through
+the C/WASM/CLI control plane is now the highest-value follow-up, since the core win is otherwise only
+reachable from Rust.
 
 
 **2. The prepared payload is large and slow to load.** 104.1 MB and ~307 ms. That is larger than the
@@ -115,10 +121,11 @@ path, and the prepared payload is what runtimes should load.
 
 Ordered by expected value per unit of risk, with correctness preserved throughout:
 
-1. ~~**Pose-only/incremental update**~~ — **DONE** for `Anny` (0.281 ms vs 9.021 ms, 32x). Still to do
-   for `AnnyF32`. This also redirected the plan: since `rest_model` is 93% of the fixed cost and
+1. ~~**Pose-only/incremental update**~~ — **DONE** for `Anny` and `AnnyF32` (0.281 / 0.275 ms vs 9.02 /
+   7.97 ms; 32x and 29x). This redirected the plan: since `rest_model` is 93% of the fixed cost and
    coefficients are 0.1%, making `rest_model` itself faster is now the whole ballgame for the
-   general path, not allocation hygiene.
+   general path, not allocation hygiene. Wiring the session through the C/WASM/CLI surfaces is the
+   open follow-up so non-Rust callers can reach the win.
 2. **`rest_model` kernel cost** — the 8.42 ms step. It is blendshape accumulation plus bone-orientation
    propagation over 104 bones and 13,718 vertices; SIMD and better memory layout apply directly here,
    and it no longer has to be guessed at, only profiled.

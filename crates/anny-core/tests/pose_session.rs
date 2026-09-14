@@ -9,10 +9,9 @@ use anny_core::{config::*, math::*, model::identity_poses, *};
 use serde_json::{json, Value};
 
 /// A pose whose root is translated and whose second bone is rotated, so the session cannot pass by
-/// simply reproducing identity.
-fn posed(model: &Anny, root: (f64, f64, f64), joint: (f64, f64, f64)) -> Value {
-    let j = model.data.bone_count();
-    let mut pose = identity_poses(1, j);
+/// simply reproducing identity. Poses reach both paths as JSON, so one builder serves f64 and f32.
+fn posed_bones(bones: usize, root: (f64, f64, f64), joint: (f64, f64, f64)) -> Value {
+    let mut pose = identity_poses(1, bones);
     write4(
         &rigid(
             &rotvec(&Vec3::new(root.0, root.1, root.2)),
@@ -28,6 +27,14 @@ fn posed(model: &Anny, root: (f64, f64, f64), joint: (f64, f64, f64)) -> Value {
         &mut pose.data[16..32],
     );
     pose.nested_json()
+}
+
+fn posed(model: &Anny, root: (f64, f64, f64), joint: (f64, f64, f64)) -> Value {
+    posed_bones(model.data.bone_count(), root, joint)
+}
+
+fn posed_f32(model: &AnnyF32, root: (f64, f64, f64), joint: (f64, f64, f64)) -> Value {
+    posed_bones(model.data().bone_count(), root, joint)
 }
 
 fn max_difference(a: &[f64], b: &[f64]) -> f64 {
@@ -212,6 +219,100 @@ fn session_coefficients_match_the_parameters_it_was_built_from() {
     let expected = model.coefficients(&p).unwrap();
     assert_eq!(session.coefficients().shape, expected.shape);
     assert_eq!(session.coefficients().data, expected.data);
+}
+
+#[test]
+fn typed_session_reproduces_typed_forward_and_is_bit_identical() {
+    let model = common::tiny().to_f32().unwrap();
+    for mode in [
+        PoseParameterization::LocalRef,
+        PoseParameterization::World,
+        PoseParameterization::WorldOrient,
+    ] {
+        let base = Parameters {
+            pose_parameterization: Some(mode),
+            ..Default::default()
+        };
+        let mut session = model.pose_session(&base).unwrap();
+        for k in 0..4 {
+            let pose = posed_f32(&model, (0.02 * k as f64, -0.01, 0.03), (0.05, 0.1, -0.2));
+            let expected = model
+                .forward(&Parameters {
+                    pose_parameters: pose.clone(),
+                    ..base.clone()
+                })
+                .unwrap();
+            let got = session.update(&pose).unwrap();
+            for (key, value) in &expected.arrays {
+                let other = got.get(key).unwrap();
+                assert_eq!(value.shape, other.shape, "{key} shape ({mode:?})");
+                assert_eq!(value.data, other.data, "{key} bits ({mode:?})");
+            }
+        }
+    }
+}
+
+#[test]
+fn typed_session_survives_a_rejected_pose() {
+    let model = common::tiny().to_f32().unwrap();
+    let mut session = model.pose_session(&Parameters::default()).unwrap();
+    let bad = json!({"not_a_bone": [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]});
+    assert!(session.update(&bad).is_err());
+    let pose = posed_f32(&model, (0.03, 0.0, 0.0), (0.0, 0.05, 0.0));
+    let expected = model
+        .forward(&Parameters {
+            pose_parameters: pose.clone(),
+            ..Default::default()
+        })
+        .unwrap();
+    let got = session.update(&pose).unwrap();
+    assert_eq!(
+        expected.get("vertices").unwrap().data,
+        got.get("vertices").unwrap().data
+    );
+}
+
+/// Real data at the full model size on the typed path: this is the surface a game runtime uses, so
+/// it is the f32 equivalence claim that actually has to hold.
+#[ignore = "real-data typed session equivalence; not part of the fast suite"]
+#[test]
+fn typed_session_matches_typed_forward_on_the_real_model() -> Result<()> {
+    let store = assets::AssetStore::new(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data"),
+    );
+    let model = store.build(&AnnyConfig::default())?.to_f32()?;
+    let base = Parameters {
+        phenotype_kwargs: json!({"gender": 0.62, "age": 0.37, "height": 0.55}),
+        ..Default::default()
+    };
+    let mut session = model.pose_session(&base)?;
+    let mut worst = 0.0f32;
+    for k in 0..8 {
+        let pose = posed_f32(
+            &model,
+            (0.01 * k as f64, -0.02, 0.03),
+            (0.04 * k as f64, 0.03, -0.02),
+        );
+        let expected = model.forward(&Parameters {
+            pose_parameters: pose.clone(),
+            ..base.clone()
+        })?;
+        let got = session.update(&pose)?;
+        for key in ["vertices", "bone_poses", "rest_vertices", "rest_bone_poses"] {
+            let e = expected.get(key)?;
+            let g = got.get(key)?;
+            assert_eq!(e.shape, g.shape, "{key} shape");
+            for (x, y) in e.data.iter().zip(&g.data) {
+                worst = worst.max((x - y).abs());
+            }
+        }
+    }
+    eprintln!("typed session vs typed forward on the real model: max difference {worst:e}");
+    assert_eq!(
+        worst, 0.0,
+        "the typed session must reproduce typed forward exactly"
+    );
+    Ok(())
 }
 
 /// Real data at the full model size: the synthetic fixture above is three vertices, so this checks

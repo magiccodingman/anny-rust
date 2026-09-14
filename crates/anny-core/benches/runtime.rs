@@ -276,6 +276,25 @@ fn main() -> Result<()> {
     })?;
     report("session", "build (coefficients + rest)", 10, &stats);
 
+    // Same measurement on the typed path, because that is the surface a game runtime uses; reporting
+    // only the f64 win would describe a path Unity and WASM never call.
+    let typed = prepared.to_f32()?;
+    let typed_parameters = Parameters::default();
+    let mut typed_session = typed.pose_session(&typed_parameters)?;
+    let mut typed_tick = 0u32;
+    let stats = measure(50, 3, || {
+        typed_tick += 1;
+        black_box(typed_session.update(&editor_pose(bones, typed_tick))?);
+        Ok(())
+    })?;
+    report("session", "f32 typed update pose", 50, &stats);
+
+    let stats = measure(20, 3, || {
+        black_box(typed.forward(&typed_parameters)?);
+        Ok(())
+    })?;
+    report("session", "f32 typed full call", 20, &stats);
+
     // Secondary operations through the shared control-plane API.
     let regressor = anny_core::tools::KeypointsRegressor::coco(&store, &prepared, None)?;
     println!("\nkeypoint regressor: {} labels\n", regressor.labels.len());

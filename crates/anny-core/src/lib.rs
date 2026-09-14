@@ -52,7 +52,7 @@ pub mod precompute;
 pub mod operations;
 
 pub mod typed;
-pub use typed::{AnnyF32, ModelOutputF32, TensorF32};
+pub use typed::{AnnyF32, ModelOutputF32, PoseSessionF32, TensorF32};
 
 pub mod motion;
 pub mod numpy;

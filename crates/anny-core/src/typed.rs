@@ -358,6 +358,25 @@ impl AnnyF32 {
     ) -> Result<TensorF32> {
         pose_parameters(&self.data, output, mode)
     }
+    /// Build a reusable pose-only evaluation context for a fixed parameter set.
+    ///
+    /// The f32 mirror of [`crate::Anny::pose_session`], and the one that matters for games: the typed
+    /// path is what a Unity or WASM runtime evaluates, so without this the product surfaces would
+    /// still rebuild the whole rest model on every pose change. See that method for the semantics.
+    pub fn pose_session(&self, p: &Parameters) -> Result<PoseSessionF32<'_>> {
+        let coefficients = self.coefficients(p)?;
+        let output = rest_model(&self.data, &self.rig, &coefficients)?;
+        Ok(PoseSessionF32 {
+            model: self,
+            coefficients,
+            output,
+            pose_parameterization: p
+                .pose_parameterization
+                .unwrap_or(self.config.pose_parameterization),
+            skinning: self.config.skinning_method,
+            return_bone_ends: p.return_bone_ends,
+        })
+    }
     pub fn to_bytes(&self) -> Result<Vec<u8>> {
         serialize(
             &self.data.arrays,
@@ -381,6 +400,53 @@ impl AnnyF32 {
 impl crate::Anny {
     pub fn to_f32(&self) -> Result<AnnyF32> {
         AnnyF32::from_anny(self)
+    }
+}
+
+/// A reusable pose-only evaluation context for the typed f32 path; see
+/// [`AnnyF32::pose_session`].
+///
+/// [`PoseSessionF32::update`] returns the same [`ModelOutputF32`] shape [`AnnyF32::forward`] returns and
+/// is bit-identical to the corresponding `forward` call for the same parameters.
+pub struct PoseSessionF32<'a> {
+    model: &'a AnnyF32,
+    coefficients: TensorF32,
+    output: ModelOutputF32,
+    pose_parameterization: PoseParameterization,
+    skinning: SkinningMethod,
+    return_bone_ends: bool,
+}
+impl PoseSessionF32<'_> {
+    /// The phenotype/local-change/facial coefficients this session was built with.
+    pub fn coefficients(&self) -> &TensorF32 {
+        &self.coefficients
+    }
+    /// Evaluate a pose against the cached rest model, reusing the previous output buffers.
+    pub fn update(&mut self, pose: &Value) -> Result<&ModelOutputF32> {
+        let output = std::mem::take(&mut self.output);
+        match pose_model(
+            &self.model.data,
+            &self.model.rig,
+            output,
+            pose,
+            self.pose_parameterization,
+            self.skinning,
+            self.return_bone_ends,
+        ) {
+            Ok(output) => {
+                self.output = output;
+                Ok(&self.output)
+            }
+            Err(e) => {
+                // Same reasoning as the f64 session: the failed call consumed the output the rest
+                // arrays live in, so the session rebuilds them to stay usable after a bad pose.
+                if let Ok(rest) = rest_model(&self.model.data, &self.model.rig, &self.coefficients)
+                {
+                    self.output = rest;
+                }
+                Err(e)
+            }
+        }
     }
 }
 fn serialize(
