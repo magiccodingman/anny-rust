@@ -110,12 +110,40 @@ only ~0.3 ms/call. Before the validation fix the same curve was dominated by a f
 why batching appeared strongly sublinear (1,205 us/character at x10 vs 9,478 at x1). That appearance
 was the scan being amortized across the batch, not a batching win. The honest reading of the new
 curve: there is no longer a fixed cost worth amortizing, and per-character work is now the whole
-story. This is the SIMD/sparsity target.
+story.
+
+**1a. The accumulation loop was then measured directly and is at the hardware limit — the SIMD win
+this document used to predict does not exist.** Isolating the inner loop (`*v += w * delta` over one
+41154-element row, 32 nonzero coefficients, 1.32M element-pairs per character) gives **0.149
+ns/element**, and the number is *flat* across footprints: 0.140 at a 64 KB working set, 0.147 at
+643 KB, 0.154 at 256 KB, 0.250 only when it exceeds cache at 2 MB. A multiply-free `*v += *delta`
+runs at the same 0.138-0.156 ns/element, so the loop is limited by its memory operations (two loads
+plus a load-modify-store per element), not by the multiply or by FMA issue. Consistent with that:
+unrolling into explicit 4-wide chunks gains **1.8%**. On this machine (Ryzen 9 7950X3D, AVX-512
+capable, so the lanes were available) there is nothing left to vectorize.
+
+The other lever was cutting the traffic, since the loop re-reads a 321 KB blendshape slice per
+nonzero coefficient. Two candidates were tested against the real tensors and both are dead:
+
+- **Sparsity.** The blendshapes are dense: of the 32 coefficients active under default parameters,
+  the slices average **77.6% nonzero elements** and **86.2% index span**, with the widest at 100% of
+  the slice. Skipping to a nonzero range saves ~14% of the span at best, and the vectorized tail
+  handling would cost most of that back.
+- **Loop reordering for batches.** Hoisting the coefficient loop outside the batch loop so each slice
+  is streamed once is *bit-exact* (verified at B=1, 2, 5, 100 including exact-zero coefficients, max
+  abs difference `0e0`), but `batch generate x100` measured 28.967 ms before and after — no change. It
+  trades re-reading slices, which were already cache-resident, for re-touching each output row once
+  per coefficient, which is worse. It was reverted rather than shipped as churn.
+
+One incidental property of the data, worth knowing: 4 of the 32 active coefficients (k=22, 31, 67,
+76) multiply **all-zero** blendshape rows, so they contribute nothing. That is a property of the
+model, not of this code, and upstream does the same work.
 
 **2. The rest model is 0.302 ms of a 0.572 ms call, and coefficients are 0.013 ms.** So a full `f64`
 generation is roughly half rest model, half pose model. `apply_blendshapes` skips zero coefficients
-already, and the default parameter set activates 32 of 624 — the meaningful remaining optimizations
-are the accumulation loop itself (vectorization, blocked access) and skipping *slices* entirely.
+already, and the default parameter set activates 32 of 624. Per point 1a there is no vectorization or
+support-skipping win left inside the accumulation, so the remaining per-character cost is the 1.32M
+element-pairs of inherent work.
 
 **3. The pose session is a real but modest win, and the earlier claim for it was wrong.** With the
 session: repeated re-posing costs 0.282 ms instead of a full 0.572 ms (**2.0x**); on the typed f32
@@ -176,9 +204,11 @@ re-reads a converted asset from the store on every call.
    verified. What remains is the per-call `MeshBvh::new` (12.9 ms of the 29.8) plus the ~1.07M-candidate
    narrow phase; the exact-AABB alternative is faster but changes the answer (see above), so the next
    step here would need to be a deliberate parity decision rather than a pure optimization.
-2. **Per-character accumulation (~286 us/character)** — now the whole cost of generation. SIMD
-   (explicitly vectorized f64/f32 kernels) and coefficient-blocked access. This is also what
-   `batch generate x100` work in a population-scale job depends on.
+2. **Per-character accumulation is closed as "measured, at the hardware limit"** — see finding 1a. No
+   vectorization, unrolling, sparsity, or loop-order win is available; the remaining 286 us/character
+   is 1.32M element-pairs of inherent work. If this must get faster, the change has to be numerical
+   (f32 storage, half the traffic) rather than structural, and that is a dtype decision, not an
+   optimization.
 3. **`derive measure` (8.5 ms)** — find out whether it is the measurement's geometry queries or its
    per-request construction.
 4. **Startup (289 ms reload / 2.14 s prepare)** — mmap the prepared payload, or avoid materializing
