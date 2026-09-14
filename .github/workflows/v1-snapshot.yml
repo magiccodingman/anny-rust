@@ -1,5 +1,5 @@
 # Temporary read-only development snapshot; remove before handoff.
-# Recovery checkpoint: resume post_gd integration from the published Adam tests.
+# Recovery checkpoint: refresh exact published source before final v1 qualification.
 name: V1 source snapshot
 on:
   push:
