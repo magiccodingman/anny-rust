@@ -311,6 +311,74 @@ pub unsafe extern "C" fn anny_string_free(s: *mut c_char) {
     }
 }
 
+/// Owned serialized data. Accessors borrow its memory until anny_bytes_free.
+pub struct AnnyBytes {
+    bytes: Vec<u8>,
+}
+/// Export a character to GLB. options_json follows scene::CharacterExport.
+/// # Safety
+/// model is live, strings are null/default or NUL-terminated UTF-8, and out
+/// points to writable handle storage. The output is owned independently.
+#[no_mangle]
+pub unsafe extern "C" fn anny_model_export_glb(
+    model: *const AnnyModel,
+    parameters_json: *const c_char,
+    options_json: *const c_char,
+    out: *mut *mut AnnyBytes,
+) -> i32 {
+    guard(|| {
+        if out.is_null() {
+            return Err("null byte output handle".into());
+        }
+        unsafe {
+            *out = ptr::null_mut();
+        }
+        let m = unsafe { model.as_ref() }.ok_or("null model")?;
+        let p: Parameters = if parameters_json.is_null() {
+            Parameters::default()
+        } else {
+            serde_json::from_str(unsafe { text(parameters_json)? }).map_err(|e| e.to_string())?
+        };
+        let o: anny_core::scene::CharacterExport = if options_json.is_null() {
+            Default::default()
+        } else {
+            serde_json::from_str(unsafe { text(options_json)? }).map_err(|e| e.to_string())?
+        };
+        let mut scene = anny_core::scene::Scene::new();
+        scene
+            .add_character(&m.model, &p, &o)
+            .map_err(|e| e.to_string())?;
+        let bytes = scene.to_glb().map_err(|e| e.to_string())?;
+        unsafe {
+            *out = Box::into_raw(Box::new(AnnyBytes { bytes }));
+        }
+        Ok(())
+    })
+}
+/// # Safety
+/// bytes is null or a live AnnyBytes. Returned data is borrowed read-only.
+#[no_mangle]
+pub unsafe extern "C" fn anny_bytes_data(bytes: *const AnnyBytes) -> *const u8 {
+    unsafe { bytes.as_ref() }.map_or(ptr::null(), |b| b.bytes.as_ptr())
+}
+/// # Safety
+/// bytes is null or a live AnnyBytes.
+#[no_mangle]
+pub unsafe extern "C" fn anny_bytes_len(bytes: *const AnnyBytes) -> usize {
+    unsafe { bytes.as_ref() }.map_or(0, |b| b.bytes.len())
+}
+/// # Safety
+/// bytes is null or a live uniquely owned handle, freed exactly once with no
+/// concurrent readers or views used afterward.
+#[no_mangle]
+pub unsafe extern "C" fn anny_bytes_free(bytes: *mut AnnyBytes) {
+    if !bytes.is_null() {
+        unsafe {
+            drop(Box::from_raw(bytes));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

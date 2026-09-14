@@ -49,6 +49,21 @@ public sealed class AnnyModel : IDisposable
         }
     }
 
+    /// <summary>Returns a standalone GLB; options can request a rigged LBS mesh.</summary>
+    public byte[] ExportGlb(string parametersJson = "{}", string optionsJson = "{}")
+    {
+        lock (gate)
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            Check(Native.ExportGlb(model, parametersJson, optionsJson, out var pointer));
+            using var bytes = new BytesHandle(pointer);
+            var count = checked((int)Native.BytesLength(bytes));
+            var result = new byte[count];
+            if (count != 0) Marshal.Copy(Native.BytesData(bytes), result, 0, count);
+            return result;
+        }
+    }
+
     private static double[] Copy(TensorView view)
     {
         var count = checked((int)view.Length);
@@ -97,9 +112,24 @@ internal sealed class OutputHandle : SafeHandle
     protected override bool ReleaseHandle() { Native.FreeOutput(handle); return true; }
 }
 
+internal sealed class BytesHandle : SafeHandle
+{
+    internal BytesHandle(IntPtr pointer) : base(IntPtr.Zero, true) => SetHandle(pointer);
+    public override bool IsInvalid => handle == IntPtr.Zero;
+    protected override bool ReleaseHandle() { Native.FreeBytes(handle); return true; }
+}
+
 internal static class Native
 {
     private const string Library = "anny_capi";
+    [DllImport(Library, EntryPoint = "anny_model_export_glb", CallingConvention = CallingConvention.Cdecl)]
+    internal static extern int ExportGlb(ModelHandle model, [MarshalAs(UnmanagedType.LPUTF8Str)] string parameters, [MarshalAs(UnmanagedType.LPUTF8Str)] string options, out IntPtr bytes);
+    [DllImport(Library, EntryPoint = "anny_bytes_data", CallingConvention = CallingConvention.Cdecl)]
+    internal static extern IntPtr BytesData(BytesHandle bytes);
+    [DllImport(Library, EntryPoint = "anny_bytes_len", CallingConvention = CallingConvention.Cdecl)]
+    internal static extern nuint BytesLength(BytesHandle bytes);
+    [DllImport(Library, EntryPoint = "anny_bytes_free", CallingConvention = CallingConvention.Cdecl)]
+    internal static extern void FreeBytes(IntPtr bytes);
     [DllImport(Library, EntryPoint = "anny_last_error", CallingConvention = CallingConvention.Cdecl)]
     internal static extern IntPtr LastError();
     [DllImport(Library, EntryPoint = "anny_model_load", CallingConvention = CallingConvention.Cdecl)]

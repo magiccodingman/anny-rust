@@ -1,0 +1,4 @@
+[
+  {"export":{"name":"Character A","translation":[-0.8,0,0],"rigged":true},"parameters":{"phenotype_kwargs":{"height":0.35,"weight":0.35}}},
+  {"export":{"name":"Character B","translation":[0.8,0,0],"rigged":true},"parameters":{"phenotype_kwargs":{"height":0.7,"weight":0.6},"facial_actions":{"mouthSmileLeft":0.4,"mouthSmileRight":0.4}}}
+]

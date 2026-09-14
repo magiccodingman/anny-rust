@@ -26,6 +26,30 @@ impl AnnyModel {
             model: Anny::from_bytes(bytes, config).map_err(js_error)?,
         })
     }
+    /// Owned bytes suitable for a Blob download; no filesystem/server dependency.
+    pub fn export_glb(
+        &self,
+        parameters_json: Option<String>,
+        options_json: Option<String>,
+    ) -> Result<js_sys::Uint8Array, JsValue> {
+        let p: Parameters = parameters_json
+            .as_deref()
+            .map(serde_json::from_str)
+            .transpose()
+            .map_err(js_error)?
+            .unwrap_or_default();
+        let o: anny_core::scene::CharacterExport = options_json
+            .as_deref()
+            .map(serde_json::from_str)
+            .transpose()
+            .map_err(js_error)?
+            .unwrap_or_default();
+        let mut scene = anny_core::scene::Scene::new();
+        scene.add_character(&self.model, &p, &o).map_err(js_error)?;
+        Ok(js_sys::Uint8Array::from(
+            scene.to_glb().map_err(js_error)?.as_slice(),
+        ))
+    }
     pub fn describe(&self) -> String {
         self.model.describe().to_string()
     }

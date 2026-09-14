@@ -124,7 +124,7 @@ fn run() -> Result<()> {
     let mut args = std::env::args().skip(1);
     let command = args.next().unwrap_or_else(|| "help".into());
     if ["help", "--help", "-h"].contains(&command.as_str()) {
-        println!("anny <prepare|generate|inspect|compare|measure|sample|fit|import-upstream|verify-assets> [options]\n\nimport-upstream --source UPSTREAM_CHECKOUT --destination NEW_DIRECTORY\n                [--allow-revision-mismatch true]\nverify-assets --assets data\nprepare --assets data [--config config.json] --output model.safetensors\ngenerate (--assets data | --model model.safetensors) [--config config.json]\n         [--params params.json] [--obj mesh.obj] [--output output.safetensors]\ninspect (--assets data | --model model.safetensors) [--config config.json]\ncompare --actual output.safetensors --expected reference.safetensors\n        [--atol 0.000001] [--rtol 0] [--report report.json]\n\nmeasure (--assets data | --model model.safetensors) [--params params.json]\nsample --assets data [--config config.json] [--options sample-options.json] --output params.json\nfit (--assets data | --model model.safetensors) --target target.safetensors\n    [--options fit-options.json] [--inverter-options inverter-options.json] --output fitted.json\n\nInputs, matrices, and output arrays are row-major. OBJ uses upstream Z-up meters.");
+        println!("anny <prepare|generate|inspect|compare|measure|sample|fit|import-upstream|verify-assets> [options]\n\nimport-upstream --source UPSTREAM_CHECKOUT --destination NEW_DIRECTORY\n                [--allow-revision-mismatch true]\nverify-assets --assets data\nprepare --assets data [--config config.json] --output model.safetensors\ngenerate (--assets data | --model model.safetensors) [--config config.json]\n         [--params params.json] [--obj mesh.obj] [--output output.safetensors]\n         [--mesh character.glb] [--rigged true|false]\nlineup --assets data [--config config.json] --params lineup.json --output scene.glb\nmesh-convert --source input.obj --destination output.ply\ninspect (--assets data | --model model.safetensors) [--config config.json]\ncompare --actual output.safetensors --expected reference.safetensors\n        [--atol 0.000001] [--rtol 0] [--report report.json]\n\nmeasure (--assets data | --model model.safetensors) [--params params.json]\nsample --assets data [--config config.json] [--options sample-options.json] --output params.json\nfit (--assets data | --model model.safetensors) --target target.safetensors\n    [--options fit-options.json] [--inverter-options inverter-options.json] --output fitted.json\n\nInputs, matrices, and output arrays are row-major. OBJ uses upstream Z-up meters.");
         return Ok(());
     }
     let allowed: BTreeSet<_> = [
@@ -145,6 +145,8 @@ fn run() -> Result<()> {
         "options",
         "inverter-options",
         "target",
+        "mesh",
+        "rigged",
     ]
     .into_iter()
     .collect();
@@ -258,9 +260,61 @@ fn run() -> Result<()> {
             std::fs::write(path, serde_json::to_vec_pretty(&result.parameters)?)?;
             println!("{}", serde_json::to_string_pretty(&result.to_json())?);
         }
+        "mesh-convert" => {
+            let input = required(&opts, "source")?;
+            let destination = Path::new(required(&opts, "destination")?);
+            let mesh = anny_core::mesh_io::load(input)?;
+            parent(destination)?;
+            match destination
+                .extension()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_ascii_lowercase()
+                .as_str()
+            {
+                "glb" | "gltf" => {
+                    let mut scene = anny_core::scene::Scene::new();
+                    scene.objects.push(anny_core::scene::SceneObject {
+                        name: "Imported surface".into(), mesh,
+                        transform: anny_core::math::Mat4::identity(), color: [0.7,0.7,0.7,1.], skin: None,
+                        extras: serde_json::json!({"note":"geometry-only conversion; skin/default morph pose baked on import"}),
+                    });
+                    scene.save(destination)?;
+                }
+                _ => anny_core::mesh_io::save(&mesh, destination)?,
+            }
+            println!("Converted geometry to {}", destination.display());
+        }
+        "lineup" => {
+            #[derive(serde::Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Character {
+                #[serde(default)]
+                parameters: Parameters,
+                #[serde(default)]
+                export: anny_core::scene::CharacterExport,
+            }
+            let characters: Vec<Character> = read_json(required(&opts, "params")?)?;
+            let m = model(&opts)?;
+            let mut scene = anny_core::scene::Scene::new();
+            for character in characters {
+                scene.add_character(&m, &character.parameters, &character.export)?;
+            }
+            let path = Path::new(required(&opts, "output")?);
+            parent(path)?;
+            scene.save(path)?;
+            println!(
+                "Exported {} separate characters to {}",
+                scene.objects.len(),
+                path.display()
+            );
+        }
         "generate" => {
-            if !opts.contains_key("output") && !opts.contains_key("obj") {
-                return Err(error("generate needs --output and/or --obj"));
+            if !opts.contains_key("output")
+                && !opts.contains_key("obj")
+                && !opts.contains_key("mesh")
+            {
+                return Err(error("generate needs --output, --obj, or --mesh"));
             }
             let m = model(&opts)?;
             let params: Parameters = opts
@@ -269,6 +323,38 @@ fn run() -> Result<()> {
                 .transpose()?
                 .unwrap_or_default();
             let out = m.forward(&params)?;
+            if let Some(path) = opts.get("mesh") {
+                let mut scene = anny_core::scene::Scene::new();
+                let rigged = match opts.get("rigged").map(String::as_str) {
+                    None | Some("false") => false,
+                    Some("true") => true,
+                    _ => return Err(error("--rigged expects true or false")),
+                };
+                scene.add_character(
+                    &m,
+                    &params,
+                    &anny_core::scene::CharacterExport {
+                        rigged,
+                        ..Default::default()
+                    },
+                )?;
+                parent(Path::new(path))?;
+                match Path::new(path)
+                    .extension()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("")
+                    .to_ascii_lowercase()
+                    .as_str()
+                {
+                    "glb" | "gltf" => scene.save(path)?,
+                    _ if rigged => {
+                        return Err(error(
+                            "rigged export requires GLB/glTF; use --rigged false to bake a surface",
+                        ))
+                    }
+                    _ => anny_core::mesh_io::save(&scene.objects[0].mesh, path)?,
+                }
+            }
             if let Some(path) = opts.get("obj") {
                 let v = out.get("vertices")?;
                 if v.shape[0] != 1 {

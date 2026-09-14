@@ -30,6 +30,12 @@ int32_t anny_model_tensor(const AnnyModel *model,const char *name,AnnyTensorView
 int32_t anny_output_tensor(const AnnyOutput *output,const char *name,AnnyTensorView *out);
 int32_t anny_model_describe(const AnnyModel *model,char **out);
 void anny_string_free(char *s);
+/* Additive ABI-1 export API; GLB has standard Y-up coordinates and f32 attributes. */
+typedef struct AnnyBytes AnnyBytes;
+int32_t anny_model_export_glb(const AnnyModel *model,const char *parameters_json,const char *options_json,AnnyBytes **out);
+const uint8_t *anny_bytes_data(const AnnyBytes *bytes);
+size_t anny_bytes_len(const AnnyBytes *bytes);
+void anny_bytes_free(AnnyBytes *bytes);
 #ifdef __cplusplus
 }
 #endif
