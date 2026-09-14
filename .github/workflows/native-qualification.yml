@@ -39,8 +39,7 @@ jobs:
           asset=wasm-bindgen-0.2.100-x86_64-unknown-linux-musl.tar.gz
           url=https://github.com/wasm-bindgen/wasm-bindgen/releases/download/0.2.100
           curl --fail --location --retry 3 "$url/$asset" -o "$asset"
-          curl --fail --location --retry 3 "$url/$asset.sha256sum" -o "$asset.sha256sum"
-          sha256sum --check "$asset.sha256sum"
+          printf '63d6a38deb65bd7023c02bdf382ab66b0d2c0241c8582fd3413b5a808b8aeb5b  %s\n' "$asset" | sha256sum --check -
           tar -xzf "$asset"
           cd ../..
           ./output/bindgen/wasm-bindgen-0.2.100-x86_64-unknown-linux-musl/wasm-bindgen --target web --out-dir examples/browser/pkg target/wasm32-unknown-unknown/release/anny_wasm.wasm
@@ -62,17 +61,22 @@ jobs:
           npx playwright install --with-deps chromium
           cd ../..
           node examples/qualification/browser.cjs
+      - name: Independently validate browser-authored morph/material/animation GLB
+        run: node examples/qualification/validate.cjs output/browser-authored.glb
       - name: Record checkpoint
         if: always()
-        run: git rev-parse HEAD > output/qualification-commit.txt
+        run: |
+          mkdir -p output
+          git rev-parse HEAD > output/qualification-commit.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: native-runtime-qualification
           path: |
             output/browser-result.json
+            output/browser-authored.glb
+            output/browser-authored.glb.validation.json
             output/qualification-commit.txt
-            output/bindgen/*.tar.gz
-            output/bindgen/*.sha256sum
+            examples/qualification/package-lock.json
             examples/browser/pkg
           retention-days: 7
