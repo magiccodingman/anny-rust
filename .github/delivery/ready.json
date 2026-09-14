@@ -1,5 +1,0 @@
-{
-  "parts": ["authoring-000.b64", "authoring-001.b64", "authoring-002.b64", "authoring-003.b64", "authoring-004.b64", "authoring-005.b64", "authoring-006.b64", "authoring-007.b64", "authoring-008.b64", "authoring-009.b64", "authoring-010.b64", "authoring-011.b64", "authoring-012.b64", "authoring-013.b64"],
-  "sha256": "86b4d8de46fcabecbe9f668e9048893adbfd6cb10cb71ef40aa643dfba768db2",
-  "message": "Add native authoring transforms, rig and weight preprocessing, cache, mesh fitting and secondary bindings"
-}

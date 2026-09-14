@@ -2,11 +2,15 @@ name: Rust validation
 on:
   pull_request:
   push:
-    branches: [main, codex/anny-rust-native-port]
+    branches: [main]
   workflow_dispatch:
     inputs:
       parity:
         description: 'Build and compare all 23 Python reference cases'
+        type: boolean
+        default: false
+      native_authoring:
+        description: 'Regenerate native orientation and skin-weight references'
         type: boolean
         default: false
 permissions:
@@ -28,10 +32,30 @@ jobs:
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo check -p anny-wasm --target wasm32-unknown-unknown --locked
       - run: cargo build --workspace --release --locked
+      - name: Verify committed native asset payload
+        run: |
+          ./target/release/anny verify-assets --assets data
+          cargo test -p anny-core --release --locked --test native_import -- --ignored --nocapture
+      - name: Prepare model and run C ABI lifecycle
+        shell: bash
+        run: |
+          mkdir -p output
+          ./target/release/anny prepare --assets data --output output/ci-model.safetensors
+          cc -std=c11 -Wall -Wextra -Werror -Iinclude examples/c_smoke.c \
+            -Ltarget/release -lanny_capi -Wl,-rpath,"$PWD/target/release" -o output/c-smoke
+          ./output/c-smoke data
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
       - run: dotnet build examples/csharp --configuration Release
+      - name: Run C# native lifecycle, not just a binding compile
+        shell: bash
+        run: |
+          export LD_LIBRARY_PATH="$PWD/target/release:${LD_LIBRARY_PATH:-}"
+          dotnet run --project examples/csharp --configuration Release --no-build -- "$PWD/output/ci-model.safetensors"
+      - name: Regenerate native authoring references (opt-in)
+        if: github.event_name == 'workflow_dispatch' && inputs.native_authoring
+        run: cargo test -p anny-core --release --locked --test authoring -- --ignored --nocapture --test-threads=1
   portable:
     strategy:
       matrix:
