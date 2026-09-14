@@ -1,195 +1,186 @@
-# Native authoring and secondary APIs
+# Native authoring
 
-All commands below are Rust executables. Python is optional reference-generation
-software, not an install, build, import, authoring, or execution requirement.
-The imported `data/` tree in this branch is ready to use.
+All authoring operations in this document are native Rust. Python is not required to transform, fit, precompute, query, refine or export models.
 
-## Model transforms
+## Prepared-model transforms
 
-```sh
-cargo build --workspace --release --locked
-./target/release/anny prepare --assets data --output output/default.safetensors
-./target/release/anny transform --model output/default.safetensors \
-  --operations examples/transform.json --output output/modified.safetensors
-```
-
-`transforms::apply_pipeline` returns a new model; it never mutates a shared
-source. Operations are tagged by `op`. Supported operations are `triangulate`,
-`edit-mesh`, `filter-faces` (`indices`), `filter-blendshapes` (`labels`),
-`remove-unattached-vertices`, `symmetrize-skinning-weights`,
-`remove-skinning-islands`, `compact-skinning-weights`, `filter-rig` (`remove`,
-`subtree`), `procrustes-orientation`, and `retopology` (`mapping`).
-
-A retopology mapping carries source `indices`, interpolation `weights`, target
-`faces`, and optional `template_vertices`, `base_mesh_vertex_indices`,
-`texture_coordinates`, and `face_texture_coordinate_indices`. These are Tensor
-objects (`shape`, flat row-major `data`, `kind`). The Rust structs are the exact
-schema; unknown JSON fields are rejected. Signed local morph pairs must be kept
-or removed together. Bone-head/tail/orientation blendshape rows stay synchronized.
-
-Important boundaries:
-
-- `edit-mesh` expects the original MakeHuman vertex numbering. It is not an
-  arbitrary topology repair operation.
-- Vertex removal composes the original source-index map. It refuses to discard
-  nonzero runtime-Procrustes samples rather than silently corrupt orientations.
-- Generic rig pruning with runtime-Procrustes or SOMA child-refinement buffers is
-  explicitly rejected; convert to an appropriate cached rig first. Bone-dependent
-  cached arrays are remapped along with names, hierarchy, and weights.
-- Modifying weights does not implicitly redesign a rig's orientation convention.
-  Orientation preprocessing is a separate explicit authoring operation.
-- Prepared configuration records construction options; transformed `ModelData`
-  itself is authoritative. Rebuilding the old config from raw assets does not
-  replay a transform pipeline. Save the operation JSON alongside an authored model.
-
-Additional public Rust functions include signed `interpolate_skinning_weights`,
-convex `interpolate_model_data` (including face-less point sets),
-`retopology_from_mesh`, legacy `apply_procrustes_retopology` with target-surface
-sample reprojection, `apply_anny_cached_orientation`, symmetry mapping,
-`regress_soma_bone_origins`, and MakeHuman-style `export_weights`.
-`assets::apply_soma_rig` and `select_blendshape_rows` remain public native helpers.
-
-## Regenerate preprocessing outputs in Rust
+Apply explicit model-data transformations and save a new prepared model:
 
 ```sh
-./target/release/anny precompute-rig --assets data --rig anny \
-  --output output/anny-covariance.safetensors
-./target/release/anny precompute-rig --assets data --rig soma \
-  --output output/soma-covariance.safetensors
-./target/release/anny recompute-weights --assets data \
-  --output output/weights.default.json
+./target/release/anny transform \
+  --model output/source.safetensors \
+  --operations examples/transforms.json \
+  --output output/transformed.safetensors
 ```
 
-The Anny bake supports `weighting` (`skinning`, `skinning-squared`,
-`principal-squared`), `aim_weight`, `aim_target` (`tail`, `children`), and
-`align_root_with_pelvis` in `--options`. Defaults reproduce the committed preset:
-squared skinning, tail aim 0.5, adult reference, and root/pelvis alignment.
-For the SOMA bake `--options` accepts `{"threshold":0.01}`.
+The native transform layer keeps dependent topology, UV, bone, weight and orientation data synchronized. Operations reject unsupported/precondition-violating combinations rather than silently leaving stale arrays.
 
-Both covariance bakes start from geometry/rig assets and do not need an existing
-covariance cache. SOMA still uses the **authored, committed** `soma_rig.pt`, including
-its RBF and bind-pose data. Reconstructing that authored data from an external
-SOMA-X package is not claimed; the package is not a required dependency here.
+The transform surface covers the useful upstream model-data work: blendshape/face filtering, mesh edits, triangulation, unattached-vertex removal, interpolation/retopology helpers, rig filtering/remapping, skin-weight symmetry/island cleanup/compaction and orientation-related preparation.
 
-`cache-orientations` bakes a custom model into a prepared model using an explicit
-reference parameter file and the same orientation options. A custom rig without
-the Anny pelvis labels should set `align_root_with_pelvis` to `false`.
-
-Precompute commands write only the requested output. They do not overwrite
-canonical `data/`, delete source files, or rewrite the source import manifest.
-Moving a changed bake into production assets is an explicit authoring decision.
-
-## Optional content-addressed disk cache
+## Rig/orientation preprocessing
 
 ```sh
-./target/release/anny inspect --assets data --cache-dir output/native-cache
-./target/release/anny inspect --assets data --cache-dir output/native-cache
-# Second invocation reports a hit on stderr.
+./target/release/anny precompute-rig \
+  --assets data --rig anny \
+  --output output/anny-orientation-cache.safetensors
+
+./target/release/anny precompute-rig \
+  --assets data --rig soma \
+  --output output/soma-orientation-cache.safetensors
+
+./target/release/anny cache-orientations \
+  --assets data \
+  --output output/oriented-model.safetensors
+
+./target/release/anny recompute-weights \
+  --assets data \
+  --output output/cleaned-weights.json
 ```
 
-The default is disabled. `--cache-dir auto` uses `ANNY_CACHE_DIR` or the OS user
-cache (`XDG_CACHE_HOME`/`~/.cache`, macOS Library/Caches, Windows LOCALAPPDATA).
-Explicit prepared models never consult the filesystem cache.
+These operations are qualified against the committed reference data; see [V1 validation](V1_VALIDATION.md).
 
-The key includes a canonical config, upstream revision, schema, native cache
-protocol, and content hashes of source assets, including external custom rig or
-weight files. Content is hashed during construction/loading, not every frame.
-An asset edit invalidates the key even if its timestamp is unchanged. Callers
-should keep source assets stable during a build; detected concurrent edits abort
-publication. Native protocol v1 is intentionally not Python's cache-key protocol.
+## Optional native disk cache
 
-Entries contain a payload checksum and length. An incomplete/corrupt cache is an
-error, not a silent fallback or permission to delete user files. Remove the named
-bad entry explicitly. Publication uses a same-directory temporary file and an
-atomic hard link; a filesystem supporting hard links is required for this optional
-cache. The cache directory must be outside the source asset tree.
-
-The Rust API is `cache::ModelCache`; custom asset providers can use a `CacheKey`
-with their own comprehensive dependency digest. C/C# can build with the optional
-cache. Browser hosts continue to load/store prepared byte arrays themselves.
-
-## Fit normal mesh files
+Asset construction can opt into a native content/config-addressed cache:
 
 ```sh
-./target/release/anny fit --model output/default.safetensors \
-  --target edited-body.obj --correspondence index --output output/fitted.json
-./target/release/anny fit --model output/default.safetensors \
-  --target scan.ply --correspondence closest-surface \
-  --mesh-fit-options fitting-options.json --output output/fitted-surface.json
+./target/release/anny inspect --assets data --cache-dir auto
 ```
 
-**Index mode** is an explicit assertion that vertices correspond to this model.
-A matching count by itself does not establish that assertion. OBJ numbering and
-this exporter’s single-character glTF `sourceVertexIndices` metadata allow
-consistent UV-seam duplicates to be collapsed. Missing IDs, conflicting duplicate
-positions, or incompatible vertex counts are errors. Multi-character scenes are
-not treated as one model's vertex correspondence.
-
-**Closest-surface mode** performs a local ICP-style loop: project the current
-body to target triangles, run the native fitting step on those correspondences,
-and repeat only while the forward surface distance does not regress. The target
-must already have approximately compatible pose, scale, and coordinates. A
-`target_transform` can explicitly align it. This does not perform global scan
-registration or promise the same optimization trajectory as upstream's
-`mesh_to_params.py`. Missing limbs, clothing, and severe initial misalignment
-require a more specialized fitting workflow.
-
-`MeshFitOptions` includes `outer_iterations`, `inner_iterations`, `tolerance`,
-optional `max_distance`, row-major `target_transform`, `initial` (FitOptions), and
-`inverter` (InverterOptions). Regular Safetensors targets retain the original
-paired-vertex `fit --options ... --inverter-options ...` behavior.
-
-## Same secondary API from Rust, C, C#, and WASM
-
-`operations::Request` / `execute` provide these tagged `operation` requests:
-
-| Operation | Required fields beyond optional `parameters` |
-| --- | --- |
-| `measure` | none |
-| `keypoints` | `regressor`: labels, weights, optional indices |
-| `pose-convert` | `mode`: one of the five native pose conventions |
-| `sample` | `distribution`, optional `options` |
-| `prior-loss` | `distribution`, `phenotypes` |
-| `fit` | `target` tensor, optional `setup` and `options` |
-| `fit-mesh` | `mesh`, `correspondence`, optional `options` |
-| `collision` | optional `group_toes`, `group_eyes`, `group_tongue` |
+or a caller-selected directory:
 
 ```sh
-./target/release/anny query --model output/default.safetensors \
-  --request examples/query-measure.json --output output/measurements.json
-./target/release/anny export-calibration --assets data --output output/calibration.json
-./target/release/anny export-keypoints --assets data --output output/keypoints.json
+./target/release/anny inspect --assets data --cache-dir /tmp/anny-cache
 ```
 
-The last two commands export actual committed calibration/regression data into
-portable JSON usable by an in-memory/browser request. They do not require Python.
-These are control-plane JSON calls, not a claim of allocation-free per-frame
-skinning. Native forward evaluation and tensor views remain separate.
+The cache is disabled unless requested. Entries are tied to the source/configuration content and are hash-checked before use.
 
-C ABI 1 gained additive functions: `anny_model_query`, `anny_model_transform`,
-`anny_model_prepared_bytes`, `anny_model_transfer_pose`, and
-`anny_model_build_cached`. Allocated text is released with `anny_string_free`;
-bytes with `anny_bytes_free`; new model handles with `anny_model_free`.
-Existing ABI functions and tensor-view layout are unchanged.
+## Fitting ordinary mesh files
 
-C# methods: `Query`, `Transform`, `SavePrepared`, `TransferPoseTo`, `FromAssets`.
-WASM methods: `query`, `transform`, `prepared_bytes`, `transfer_pose`.
-GLB export is also available over all three bindings. A transformed model owns
-independent data; it does not invalidate an existing model or borrowed view.
-
-## Small operational timing probe
+For mesh files, use explicit correspondence semantics:
 
 ```sh
-./target/release/anny benchmark --model output/default.safetensors \
-  --iterations 10 --warmup 1 --report output/timings.json
+./target/release/anny fit \
+  --assets data \
+  --target target.glb \
+  --correspondence index \
+  --mesh-fit-options examples/mesh-fit-options.json \
+  --output output/fitted.json
 ```
 
-This separates construction/load from repeated CPU-f64 evaluation and records
-batch size, raw timing samples, median, p95, OS, and architecture. It is a useful
-local timing probe, not a full GPU/browser/convergence qualification campaign.
-The default unit suite remains small; real preprocessing tests are explicitly
-ignored unless requested:
+or initialized local closest-surface fitting:
 
 ```sh
-cargo test -p anny-core --release --test authoring -- --ignored --nocapture --test-threads=1
+./target/release/anny fit \
+  --assets data \
+  --target target.ply \
+  --correspondence closest-surface \
+  --mesh-fit-options examples/mesh-fit-options.json \
+  --output output/fitted.json
 ```
+
+Native fitting supports known correspondence, local closest-surface fitting and explicit landmark similarity initialization. The latter two are useful registration tools, but they do not imply globally robust automatic alignment for every unknown/unoriented scan.
+
+## Analytic differentiation and refinement
+
+Native v1 includes specialized analytic derivatives for Anny fitting controls and a native Adam refinement stage.
+
+The shared serialized query API uses the same request definitions from Rust, C/C# and WASM. CLI example:
+
+```sh
+./target/release/anny query \
+  --model output/model.safetensors \
+  --request request.json \
+  --output response.json
+```
+
+Supported shared operations are:
+
+- `jvp` — directional output derivative for selected parameter directions.
+- `vjp` — contract output cotangents back onto a selected Anny control set.
+- `refine` — native Adam refinement against target vertices.
+- `prior-gradient` — calibrated shape-prior loss and phenotype gradient.
+- `motion-resample` — resample a native pose clip.
+- `align-landmarks` — solve explicit landmark similarity initialization.
+- `measure` — anthropometry.
+- `keypoints` — supplied keypoint-regressor query.
+- `pose-convert` — convert generated pose representation.
+- `sample` / `prior-loss` — calibrated distribution operations.
+- `fit` / `fit-mesh` — inverter and ordinary-mesh fitting.
+- `collision` — deterministic CPU self-intersection partner query.
+
+This API is deliberately explicit/serializable rather than pretending foreign languages own Rust/PyTorch tensor objects.
+
+### `post_gd`
+
+The inverter's optional `post_gd` path is native. It uses the specialized analytic derivatives plus native Adam and supports the bounded control surface needed by Anny fitting: phenotype logits, pose/root rotation vectors, root translation, local/facial clamps, shared phenotypes and optional calibrated prior regularization.
+
+It is **not** a generic framework-autograd engine and does not promise the identical f32 optimizer trajectory of the upstream PyTorch implementation.
+
+## Motion authoring
+
+Native `PoseClip` support includes validation, interpolation/resampling and retargeting. Export to GLB:
+
+```sh
+./target/release/anny motion \
+  --assets data \
+  --source examples/motion.json \
+  --fps 30 \
+  --precision f32 \
+  --output output/motion.glb
+```
+
+NPY/NPZ parsing supports the native AMASS workflow. `amass-fit` requires caller-supplied external SMPL-X/SMPL data/correspondence where NAVER does not commit those licensed assets.
+
+## glTF retained-document authoring
+
+For edits that must preserve authored document state, use `gltf-edit` / `gltf-query` instead of flattening through the geometry-only importer:
+
+```sh
+./target/release/anny gltf-edit \
+  --source input.glb \
+  --operations edits.json \
+  --output result.glb
+
+./target/release/anny gltf-query \
+  --source result.glb \
+  --request query.json \
+  --output result.json
+```
+
+The retained document layer supports the base-glTF features used by this project, including:
+
+- morph targets / weight animation,
+- PNG/JPEG image embedding,
+- PBR material data,
+- skeletal/TRS animation import and sampling,
+- animation editing/query paths,
+- output as normal GLB bytes for C/C#/WASM consumers.
+
+Unsupported extensions/compression/codecs are not silently interpreted as equivalent base-glTF data. See [Scenes and mesh I/O](SCENES_AND_MESH_IO.md).
+
+## Portable calibration/keypoint data
+
+```sh
+./target/release/anny export-calibration \
+  --assets data \
+  --output output/calibration.json
+
+./target/release/anny export-keypoints \
+  --assets data \
+  --output output/keypoints.json
+```
+
+These make the relevant secondary data explicit/portable rather than depending on Python objects.
+
+## Benchmark command
+
+```sh
+./target/release/anny benchmark \
+  --assets data \
+  --iterations 20 \
+  --warmup 2 \
+  --report output/benchmark.json
+```
+
+The benchmark is a reproducible CPU timing harness, not a real-time performance guarantee. GPU/WebGPU, SIMD and the broader profiling/optimization phase are intentionally deferred until after native-v1 correctness/portability.
