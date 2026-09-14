@@ -22,7 +22,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = refs/heads/codex/native-v1-completion
-          base64 --decode .github/v1-delivery/payload.b64 | gzip --decompress > "$RUNNER_TEMP/native.patch"
+          cat .github/v1-delivery/000.b64 .github/v1-delivery/001.b64 .github/v1-delivery/002.b64 .github/v1-delivery/003.b64 .github/v1-delivery/004.b64 .github/v1-delivery/005.b64 .github/v1-delivery/006.b64 .github/v1-delivery/007.b64 | base64 --decode | gzip --decompress > "$RUNNER_TEMP/native.patch"
           expected=$(jq -r .sha256 .github/v1-delivery/ready.json)
           test "$(sha256sum "$RUNNER_TEMP/native.patch" | cut -d' ' -f1)" = "$expected"
           git apply --check "$RUNNER_TEMP/native.patch"
