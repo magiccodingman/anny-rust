@@ -1,11 +1,14 @@
-# Temporary delivery workflow; removed after the source commit is verified.
+# Temporary delivery workflow; removed after the tested source is published.
 name: Native extension delivery
 on:
   push:
     branches: [codex/anny-rust-native-port]
-    paths: ['.github/extension-payload/**']
+    paths: ['.github/delivery/ready.json']
 permissions:
   contents: write
+concurrency:
+  group: native-extension-delivery
+  cancel-in-progress: false
 jobs:
   deliver:
     runs-on: ubuntu-latest
@@ -17,14 +20,21 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
           components: rustfmt, clippy
-      - name: Apply and validate exact source patch
+      - name: Apply exact checksummed source patch
         shell: bash
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = refs/heads/codex/anny-rust-native-port
-          cat .github/extension-payload/*.b64 | base64 --decode | gzip --decompress > "$RUNNER_TEMP/extension.patch"
+          while IFS= read -r part; do
+            [[ "$part" =~ ^[a-z0-9-]+\.b64$ ]] || exit 1
+            cat ".github/delivery/$part"
+          done < <(jq -r '.parts[]' .github/delivery/ready.json) | base64 --decode | gzip --decompress > "$RUNNER_TEMP/extension.patch"
+          expected=$(jq -r .sha256 .github/delivery/ready.json)
+          test "$(sha256sum "$RUNNER_TEMP/extension.patch" | cut -d' ' -f1)" = "$expected"
           git apply --check "$RUNNER_TEMP/extension.patch"
           git apply "$RUNNER_TEMP/extension.patch"
+      - name: Validate source and native assets
+        run: |
           cargo fmt --all -- --check
           cargo test --workspace --locked
           cargo clippy --workspace --all-targets --locked -- -D warnings
@@ -32,18 +42,15 @@ jobs:
           cargo test -p anny-core --release --locked --test native_import -- --ignored --nocapture
           cargo build -p anny-cli --release --locked
           ./target/release/anny verify-assets --assets data
-      - name: Commit tested source without touching assets or main
+      - name: Commit validated source without changing assets or main
         shell: bash
         run: |
           set -euo pipefail
-          git add -- Cargo.toml Cargo.lock crates docs README.md
-          if git diff --cached --name-only | grep -E '^(data/|\.github/workflows/)'; then
-            echo 'Unexpected protected-path change' >&2
-            exit 1
-          fi
+          git add -- Cargo.toml Cargo.lock crates include examples docs README.md
+          if git diff --cached --name-only | grep -E '^(data/|\.github/)'; then exit 1; fi
           test "$(git ls-remote origin refs/heads/codex/anny-rust-native-port | cut -f1)" = "$GITHUB_SHA"
           git config user.name 'Anny Rust port'
           git config user.email '131926685+magiccodingman@users.noreply.github.com'
-          git commit -m "Implement native upstream import and bounded PyTorch tensor archive decoding"
+          git commit -m "$(jq -r .message .github/delivery/ready.json)"
           git push origin HEAD:refs/heads/codex/anny-rust-native-port
           git rev-parse HEAD
