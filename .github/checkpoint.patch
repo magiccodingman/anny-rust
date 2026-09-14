@@ -1,0 +1,58 @@
+diff --git a/crates/anny-core/src/differentiation/mod.rs b/crates/anny-core/src/differentiation/mod.rs
+index 9538681..64ed057 100644
+--- a/crates/anny-core/src/differentiation/mod.rs
++++ b/crates/anny-core/src/differentiation/mod.rs
+@@ -142,8 +142,10 @@ fn coefficient_direction(model: &Anny, p: &Parameters, dir: &ParameterDirection)
+     let off = off + fa.shape[1];
+     for (i, name) in model.local_change_labels.iter().enumerate() {
+         let d = *dir.local_changes.get(name).unwrap_or(&0.);
+-        out.data[off + 2 * i] = if lo.data[i] > 0. { d } else { 0. };
+-        out.data[off + 2 * i + 1] = if lo.data[i] < 0. { -d } else { 0. };
++        // Upstream deliberately differentiates both masked branches at zero.
++        // A ReLU-style zero derivative would leave newly enabled locals dead.
++        out.data[off + 2 * i] = if lo.data[i] >= 0. { d } else { 0. };
++        out.data[off + 2 * i + 1] = if lo.data[i] <= 0. { -d } else { 0. };
+     }
+     out.validate()?;
+     Ok(out)
+@@ -428,6 +430,8 @@ fn posed(
+ /// Return the Jacobian-vector product for a single character. Branch decisions
+ /// follow the evaluated point. At non-unique orientation projections the function
+ /// returns an error rather than claiming a derivative. No epsilon is used.
++/// At a zero local morph the upstream masked-branch subgradient is used: both
++/// signed branches contribute. This is not a classical derivative at the kink.
+ pub fn jvp(m: &Anny, p: &Parameters, direction: &ParameterDirection) -> Result<ModelOutput> {
+     let base = m.forward(p)?;
+     jvp_at(m, p, direction, &base)
+diff --git a/crates/anny-core/tests/local_gradient.rs b/crates/anny-core/tests/local_gradient.rs
+new file mode 100644
+index 0000000..894e0f2
+--- /dev/null
++++ b/crates/anny-core/tests/local_gradient.rs
+@@ -0,0 +1,26 @@
++mod common;
++use anny_core::{
++    differentiation::{jvp, ParameterDirection},
++    Parameters,
++};
++use serde_json::json;
++
++#[test]
++fn zero_local_uses_upstream_masked_branch_subgradient() {
++    let model = common::tiny();
++    let mut direction = ParameterDirection::default();
++    direction.local_changes.insert("test-pos".into(), 0.25);
++    // The fixture has +0.5 and -0.3 signed targets. Upstream intentionally
++    // gives both branches a derivative at zero: 0.5 - (-0.3), not ReLU's zero
++    // and not the central-difference average of the two one-sided slopes.
++    for (value, slope) in [(0., 0.8), (0.2, 0.5), (-0.2, 0.3)] {
++        let p = Parameters {
++            local_changes_kwargs: json!({"test-pos":value}),
++            ..Default::default()
++        };
++        let result = jvp(&model, &p, &direction).unwrap();
++        let actual = &result.get("rest_vertices").unwrap().data;
++        assert!((actual[3] - 0.25 * slope).abs() < 1e-12);
++        assert!(actual.iter().enumerate().all(|(i, &v)| i == 3 || v == 0.));
++    }
++}
