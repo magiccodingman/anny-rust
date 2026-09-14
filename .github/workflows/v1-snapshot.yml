@@ -1,4 +1,4 @@
-# Temporary development input snapshot; removed before handoff.
+# Temporary read-only development snapshot; remove before handoff.
 name: V1 source snapshot
 on:
   push:
@@ -14,8 +14,9 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@1.90.0
-      - name: Snapshot tracked source and locked dependencies
+      - name: Snapshot published source and locked dependencies
         run: |
+          set -eu
           mkdir -p /tmp/v1-source
           git archive HEAD | gzip > /tmp/v1-source/source.tar.gz
           git rev-parse HEAD > /tmp/v1-source/commit.txt
@@ -26,5 +27,5 @@ jobs:
         with:
           name: v1-source
           path: /tmp/v1-source
-          retention-days: 1
+          retention-days: 7
           compression-level: 0
