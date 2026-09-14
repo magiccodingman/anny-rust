@@ -1,0 +1,47 @@
+# Temporary transport for small, readable source patches. Remove at handoff.
+name: Native source checkpoint
+on:
+  push:
+    branches: [codex/native-v1-completion]
+    paths: [.github/checkpoint.patch]
+permissions:
+  contents: write
+concurrency:
+  group: native-source-checkpoint
+  cancel-in-progress: false
+jobs:
+  checkpoint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Apply and publish source before lengthy checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/codex/native-v1-completion
+          git apply --check .github/checkpoint.patch
+          git apply --index .github/checkpoint.patch
+          if git diff --cached --name-only | grep -Ev '^(crates/|docs/|examples/|include/|README.md$|Cargo.toml$|Cargo.lock$)'; then
+            echo 'Patch contains a path outside the native source scope' >&2
+            exit 1
+          fi
+          git diff --cached --check
+          test "$(git ls-remote origin refs/heads/codex/native-v1-completion | cut -f1)" = "$GITHUB_SHA"
+          git rm -- .github/checkpoint.patch
+          git config user.name 'Anny Rust port'
+          git config user.email '131926685+magiccodingman@users.noreply.github.com'
+          git commit -m "Publish native source checkpoint (see source diff and PR ledger)"
+          git push origin HEAD:refs/heads/codex/native-v1-completion
+          git rev-parse HEAD
+      - uses: dtolnay/rust-toolchain@1.90.0
+        with:
+          targets: wasm32-unknown-unknown
+          components: rustfmt, clippy
+      - name: Validate the published source
+        run: |
+          cargo fmt --all -- --check
+          cargo test --workspace --locked
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+          cargo check -p anny-wasm --target wasm32-unknown-unknown --locked
