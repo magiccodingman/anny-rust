@@ -153,7 +153,8 @@ unaffected: it keys on config plus asset fingerprint and verifies the sha256 it 
 | operation | min | median |
 |---|---|---|
 | `prepare default (cold)` | 222.905 ms | 223.763 ms |
-| `reload prepared f32 bytes` (104.1 MB payload) | 58.128 ms | 59.003 ms |
+| `reload prepared f32 bytes` (104.1 MB payload) | 29.480 ms | 30.578 ms |
+| `reload prepared f64 bytes` (205.9 MB payload) | 66.106 ms | 70.650 ms |
 | `generate f64 default` | 0.572 ms | 0.600 ms |
 | `generate f64 dqs` | 1.331 ms | 1.443 ms |
 | `generate f64 makehuman rig` | 0.559 ms | 0.648 ms |
@@ -289,6 +290,25 @@ macro/facial/local ordering rules. `tests/prepared_payload.rs` pins the new load
 bit-identical arrays and identical posed output. What remains is one unavoidable 104 MB copy plus the
 per-tensor validity scan.
 
+The decode itself was still single-threaded, even though every element converts independently. Both
+loaders now split large tensors (65,536 elements and up) into one contiguous chunk per core, which is the
+granularity that matters here: the payload's single blendshape tensor holds most of its bytes, so
+parallelising across tensors alone would have left one thread doing nearly all the work. Measured against
+the sequential decoder on the same machine state, with the f64 row added to the benchmark for it:
+
+| row | sequential | parallel | |
+|---|---|---|---|
+| `reload prepared f32 bytes` (104.1 MB payload) | 62.233 / 64.363 ms | **29.480 / 30.578 ms** | 2.11x |
+| `reload prepared f64 bytes` (205.9 MB payload) | 135.996 / 140.568 ms | **66.106 / 70.650 ms** | 2.06x |
+
+Chunking cannot change a value: each element converts independently, chunk boundaries always fall on an
+element boundary, and every element is written by exactly one thread. The oracles agree —
+`all_committed_tensor_archives_match_python_conversion` for the f64 decoder,
+`direct_f32_reload_matches_the_widening_path` and `direct_f32_reload_poses_identically` for the f32 one,
+the prepared-payload tensor digest, and unchanged values in both C smokes and the .NET example. Both rows
+now move ~208 MB and ~412 MB at ~7 GB/s and ~6 GB/s, which points at memory bandwidth rather than
+arithmetic as the next limit — inference from two data points, not a measurement.
+
 ## Ranking of remaining work, by measured upside
 
 1. **Collision is no longer the top outlier.** It went 64.6 → 29.8 ms this session and is exact-output
@@ -302,7 +322,8 @@ per-tensor validity scan.
    optimization.
 3. **`derive measure` (8.5 ms)** — find out whether it is the measurement's geometry queries or its
    per-request construction.
-4. **Startup: cold preparation is down to 222.9 ms (was 2140.9 ms, 9.6x) and reload is 60.5 ms.** The
+4. **Startup: cold preparation is down to 223-240 ms (was 2140.9 ms, ~9.5x) and the reload is 29.5 ms
+   (f32) / 66.1 ms (f64), each ~2.1x faster than the sequential decoder.** The
    remaining prepare cost is spread thin — the 624 target files at 76-85 ms, the vertex gather at
    45.7 ms, the rig archive at 38.2 ms, orientation at 14.0 ms, `load_obj` at 11.8 ms — so no single
    step is worth a rewrite any more. The 104.1 MB payload reload is one copy plus a full validity scan;
@@ -316,7 +337,8 @@ per-tensor validity scan.
 ## Status
 
 Optimizations implemented and measured, every one bit-equivalence tested against the path it replaced:
-the validation-scan fix (16-18x on every generation path), the pose session (1.5-2x on repeated
+the validation-scan fix (16-18x on every generation path), the parallel tensor decode (2.1x on both
+payload precisions), the pose session (1.5-2x on repeated
 re-posing), the collision BVH buffer reuse (2.17x), the direct f32 prepared-payload decode (4.9x), and
 the cold prepare path (9.6x, with its tensor digest pinned by `tests/prepare_equivalence.rs`). Everything
 in the ranking above is *not* done, and no row in this document is a real-time performance guarantee

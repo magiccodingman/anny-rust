@@ -153,6 +153,19 @@ fn main() -> Result<()> {
     })?;
     report("prepare", "reload prepared f32 bytes", 5, &stats);
 
+    // The f64 archive is the same path with twice the bytes, used by the CLI and the fitting tooling.
+    let bytes64 = prepared.data.archive(Some(&default))?.to_bytes()?;
+    println!(
+        "prepared f64 payload: {:.1} MB\n",
+        bytes64.len() as f64 / (1024.0 * 1024.0)
+    );
+    let stats = measure(5, 1, || {
+        let model = anny_core::Anny::from_bytes(&bytes64, Some(default.clone()))?;
+        black_box(model.data.vertex_count());
+        Ok(())
+    })?;
+    report("prepare", "reload prepared f64 bytes", 5, &stats);
+
     // Forward evaluation across the configurations that matter for games and tools.
     let configurations = vec![
         ("f64 default", default.clone()),

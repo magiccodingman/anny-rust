@@ -364,14 +364,14 @@ impl Archive {
 /// storage type directly instead. Integer and boolean entries widen to f32 the same way they widen
 /// to f64, which keeps [`Kind`] and every downstream label/coefficient rule identical.
 pub(crate) fn decode_f32(dtype: Dtype, bytes: &[u8]) -> Result<(Kind, Vec<f32>)> {
-    macro_rules! convert {
-        ($ty:ty,$size:literal) => {
-            bytes
-                .chunks_exact($size)
-                .map(|x| <$ty>::from_le_bytes(x.try_into().unwrap()) as f32)
-                .collect()
-        };
-    }
+    let (kind, element) = f32_layout(dtype)?;
+    let mut data = vec![0.; bytes.len() / element];
+    decode_f32_into(dtype, element, bytes, &mut data);
+    Ok((kind, data))
+}
+/// The [`Kind`] and element width of a dtype, or the error the decoders raise for one they cannot
+/// read. Splitting this out lets the parallel path reject an unsupported dtype before it spawns.
+fn f32_layout(dtype: Dtype) -> Result<(Kind, usize)> {
     let integer = matches!(
         dtype,
         Dtype::I8
@@ -390,39 +390,83 @@ pub(crate) fn decode_f32(dtype: Dtype, bytes: &[u8]) -> Result<(Kind, Vec<f32>)>
     } else {
         Kind::Float
     };
-    let data = match dtype {
-        Dtype::F64 => convert!(f64, 8),
-        Dtype::F32 => convert!(f32, 4),
-        Dtype::I64 => convert!(i64, 8),
-        Dtype::I32 => convert!(i32, 4),
-        Dtype::I16 => convert!(i16, 2),
-        Dtype::I8 => convert!(i8, 1),
-        Dtype::U64 => convert!(u64, 8),
-        Dtype::U32 => convert!(u32, 4),
-        Dtype::U16 => convert!(u16, 2),
-        Dtype::U8 => convert!(u8, 1),
-        Dtype::BOOL => bytes
-            .iter()
-            .map(|&x| if x == 0 { 0. } else { 1. })
-            .collect(),
+    let element = match dtype {
+        Dtype::F64 | Dtype::I64 | Dtype::U64 => 8,
+        Dtype::F32 | Dtype::I32 | Dtype::U32 => 4,
+        Dtype::I16 | Dtype::U16 => 2,
+        Dtype::I8 | Dtype::U8 | Dtype::BOOL => 1,
         other => {
             return Err(crate::Error::Invalid(format!(
                 "unsupported safetensors dtype {other:?}"
             )))
         }
     };
-    Ok((kind, data))
+    Ok((kind, element))
 }
-
-fn decode(dtype: Dtype, bytes: &[u8]) -> Result<(Kind, Vec<f64>)> {
-    macro_rules! convert {
+/// Elements below which a tensor is decoded on the calling thread: the payload's big tensors are
+/// hundreds of megabytes, its metadata tensors are a handful of entries, and thread setup would
+/// dominate the small ones.
+const PARALLEL_DECODE_ELEMENTS: usize = 1 << 16;
+/// Decode `bytes` into `out`, splitting large tensors over the available cores.
+///
+/// Every element converts independently, so how the input is chopped cannot change a value, and the
+/// chunks write to disjoint slices. A model reload is dominated by its one blendshape tensor, so the
+/// parallelism has to work inside a tensor, not only across tensors.
+fn decode_f32_into(dtype: Dtype, element: usize, bytes: &[u8], out: &mut [f32]) {
+    if out.len() < PARALLEL_DECODE_ELEMENTS {
+        decode_f32_chunk(dtype, bytes, out);
+        return;
+    }
+    let threads = std::thread::available_parallelism()
+        .map_or(1, std::num::NonZeroUsize::get)
+        .min(out.len().div_ceil(PARALLEL_DECODE_ELEMENTS))
+        .max(1);
+    let per = out.len().div_ceil(threads);
+    std::thread::scope(|scope| {
+        for (source, destination) in bytes.chunks(per * element).zip(out.chunks_mut(per)) {
+            scope.spawn(move || decode_f32_chunk(dtype, source, destination));
+        }
+    });
+}
+/// One slice of a tensor, decoded the same way the serial loop decoded the whole thing.
+fn decode_f32_chunk(dtype: Dtype, bytes: &[u8], out: &mut [f32]) {
+    macro_rules! copy {
         ($ty:ty,$size:literal) => {
-            bytes
-                .chunks_exact($size)
-                .map(|x| <$ty>::from_le_bytes(x.try_into().unwrap()) as f64)
-                .collect()
+            for (value, x) in out.iter_mut().zip(bytes.chunks_exact($size)) {
+                *value = <$ty>::from_le_bytes(x.try_into().unwrap()) as f32;
+            }
         };
     }
+    match dtype {
+        Dtype::F64 => copy!(f64, 8),
+        Dtype::F32 => copy!(f32, 4),
+        Dtype::I64 => copy!(i64, 8),
+        Dtype::I32 => copy!(i32, 4),
+        Dtype::I16 => copy!(i16, 2),
+        Dtype::I8 => copy!(i8, 1),
+        Dtype::U64 => copy!(u64, 8),
+        Dtype::U32 => copy!(u32, 4),
+        Dtype::U16 => copy!(u16, 2),
+        Dtype::U8 => copy!(u8, 1),
+        Dtype::BOOL => {
+            for (value, &x) in out.iter_mut().zip(bytes) {
+                *value = if x == 0 { 0. } else { 1. };
+            }
+        }
+        // `f32_layout` rejects every other dtype before this is reached.
+        _ => {}
+    }
+}
+fn decode(dtype: Dtype, bytes: &[u8]) -> Result<(Kind, Vec<f64>)> {
+    let (kind, element) = f64_layout(dtype)?;
+    let mut data = vec![0.; bytes.len() / element];
+    decode_into(dtype, element, bytes, &mut data);
+    Ok((kind, data))
+}
+/// The f64 twin of [`f32_layout`]. It has to carry its own dtype table and error text: this decoder
+/// also reads the half-precision dtypes, and its message for an unreadable one is not the same
+/// string the f32 decoder uses.
+fn f64_layout(dtype: Dtype) -> Result<(Kind, usize)> {
     let integer = matches!(
         dtype,
         Dtype::I8
@@ -441,48 +485,89 @@ fn decode(dtype: Dtype, bytes: &[u8]) -> Result<(Kind, Vec<f64>)> {
     } else {
         Kind::Float
     };
-    let data = match dtype {
-        Dtype::F64 => convert!(f64, 8),
-        Dtype::F32 => convert!(f32, 4),
-        Dtype::I64 => convert!(i64, 8),
-        Dtype::U64 => convert!(u64, 8),
-        Dtype::I32 => convert!(i32, 4),
-        Dtype::U32 => convert!(u32, 4),
-        Dtype::I16 => convert!(i16, 2),
-        Dtype::U16 => convert!(u16, 2),
-        Dtype::I8 => bytes.iter().map(|x| (*x as i8) as f64).collect(),
-        Dtype::U8 | Dtype::BOOL => bytes.iter().map(|x| *x as f64).collect(),
-        Dtype::BF16 => bytes
-            .chunks_exact(2)
-            .map(|x| {
-                f32::from_bits((u16::from_le_bytes(x.try_into().unwrap()) as u32) << 16) as f64
-            })
-            .collect(),
-        Dtype::F16 => bytes
-            .chunks_exact(2)
-            .map(|x| {
+    let element = match dtype {
+        Dtype::F64 | Dtype::I64 | Dtype::U64 => 8,
+        Dtype::F32 | Dtype::I32 | Dtype::U32 => 4,
+        Dtype::I16 | Dtype::U16 | Dtype::BF16 | Dtype::F16 => 2,
+        Dtype::I8 | Dtype::U8 | Dtype::BOOL => 1,
+        other => {
+            return Err(Error::Invalid(format!(
+                "unsupported tensor dtype {other:?}"
+            )))
+        }
+    };
+    Ok((kind, element))
+}
+fn decode_into(dtype: Dtype, element: usize, bytes: &[u8], out: &mut [f64]) {
+    if out.len() < PARALLEL_DECODE_ELEMENTS {
+        decode_chunk(dtype, bytes, out);
+        return;
+    }
+    let threads = std::thread::available_parallelism()
+        .map_or(1, std::num::NonZeroUsize::get)
+        .min(out.len().div_ceil(PARALLEL_DECODE_ELEMENTS))
+        .max(1);
+    let per = out.len().div_ceil(threads);
+    std::thread::scope(|scope| {
+        for (source, destination) in bytes.chunks(per * element).zip(out.chunks_mut(per)) {
+            scope.spawn(move || decode_chunk(dtype, source, destination));
+        }
+    });
+}
+fn decode_chunk(dtype: Dtype, bytes: &[u8], out: &mut [f64]) {
+    macro_rules! copy {
+        ($ty:ty,$size:literal) => {
+            for (value, x) in out.iter_mut().zip(bytes.chunks_exact($size)) {
+                *value = <$ty>::from_le_bytes(x.try_into().unwrap()) as f64;
+            }
+        };
+    }
+    match dtype {
+        Dtype::F64 => copy!(f64, 8),
+        Dtype::F32 => copy!(f32, 4),
+        Dtype::I64 => copy!(i64, 8),
+        Dtype::U64 => copy!(u64, 8),
+        Dtype::I32 => copy!(i32, 4),
+        Dtype::U32 => copy!(u32, 4),
+        Dtype::I16 => copy!(i16, 2),
+        Dtype::U16 => copy!(u16, 2),
+        Dtype::I8 => {
+            for (value, &x) in out.iter_mut().zip(bytes) {
+                *value = (x as i8) as f64;
+            }
+        }
+        Dtype::U8 | Dtype::BOOL => {
+            for (value, &x) in out.iter_mut().zip(bytes) {
+                *value = x as f64;
+            }
+        }
+        Dtype::BF16 => {
+            for (value, x) in out.iter_mut().zip(bytes.chunks_exact(2)) {
+                *value =
+                    f32::from_bits((u16::from_le_bytes(x.try_into().unwrap()) as u32) << 16) as f64;
+            }
+        }
+        Dtype::F16 => {
+            for (value, x) in out.iter_mut().zip(bytes.chunks_exact(2)) {
                 let h = u16::from_le_bytes(x.try_into().unwrap());
                 let sign = if h & 0x8000 == 0 { 1. } else { -1. };
                 let e = ((h >> 10) & 31) as i32;
                 let f = (h & 1023) as f64;
-                sign * if e == 0 {
-                    f * 2f64.powi(-24)
-                } else if e == 31 {
-                    if f == 0. {
-                        f64::INFINITY
+                *value = sign
+                    * if e == 0 {
+                        f * 2f64.powi(-24)
+                    } else if e == 31 {
+                        if f == 0. {
+                            f64::INFINITY
+                        } else {
+                            f64::NAN
+                        }
                     } else {
-                        f64::NAN
-                    }
-                } else {
-                    (1. + f / 1024.) * 2f64.powi(e - 15)
-                }
-            })
-            .collect(),
-        _ => {
-            return Err(Error::Invalid(format!(
-                "unsupported tensor dtype {dtype:?}"
-            )))
+                        (1. + f / 1024.) * 2f64.powi(e - 15)
+                    };
+            }
         }
-    };
-    Ok((kind, data))
+        // `f64_layout` rejects every other dtype before this is reached.
+        _ => {}
+    }
 }
