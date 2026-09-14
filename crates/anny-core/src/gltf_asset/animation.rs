@@ -278,7 +278,7 @@ impl GltfAsset {
                 ensure(
                     (component == Some(5126) && !output_normalized)
                         || (matches!(path, AnimationPath::Rotation | AnimationPath::Weights)
-                            && matches!(component, Some(5120 | 5121 | 5122 | 5123))
+                            && matches!(component, Some(5120..=5123))
                             && output_normalized),
                     "unsupported animation output component type/normalization",
                 )?;
