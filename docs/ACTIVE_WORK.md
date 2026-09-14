@@ -1,52 +1,53 @@
 # PR #2 working checkpoint
 
-Branch: `codex/native-v1-completion`, base `main@2ff24c4d8e864bba0e460f6074d23437e19aed71`.
-Do not merge, force-push, alter canonical assets, or overwrite the owner's tools.
-Publish small checkpoints; local agent workspaces are transient.
+Branch: `codex/native-v1-completion`; base `main@2ff24c4d8e864bba0e460f6074d23437e19aed71`.
+Do not merge, force-push, modify canonical `data/`, or overwrite owner `tools/`.
+Publish small source checkpoints and verify remote SHAs. Local work is transient.
+Retry intermittent publishing failures; if persistent, stop and involve the owner.
 
-## Published source recovered and verified
+## Current source, not the stale payload-only state
 
-Source snapshot `6547a331c3d32b45dc0751d81e5a928f2a2a0915` has exact local/remote
-Git tree `f0677f4655747c2681f6ebc8bb09df21f63fe9ec`. Source is in ordinary
-Rust paths, not merely an encoded delivery payload.
+Recovered snapshot `bcb79bedc2bef7b1856154970b6ab39c5b160107` exactly matches Git
+tree `0dccf33abe479702824a2314fe8a6c64319232a8`. The following are already in ordinary
+source paths; do not reimplement them based on an older status message:
 
-- Shared f32/f64 equations and genuine single-precision model evaluation.
-- Typed C/C#/WASM interfaces and native CLI precision selection.
-- Native NPY/NPZ decoding, pose clips/resampling and supplied-pose GLB animation.
-- Optional supplied-model AMASS baseline with explicit vertex correspondence.
-- Landmark fitting initialization.
-- Specialized analytic parameter JVPs and calibrated prior derivatives.
+- Shared-equation true f32/f64 evaluation, typed C/C#/WASM and CLI precision.
+- Native NPY/NPZ, pose clips/resampling, supplied-pose GLB animation and optional
+  supplied-model AMASS baseline with explicit correspondence.
+- Landmark fitting initialization; analytic parameter JVP/VJP and shape priors.
+- Native Adam in `refinement.rs`, optional inverter `post_gd`, and the common
+  `jvp`/`vjp`/`refine` query operations used by C/C#/WASM. Post-GD is off by default.
+- `gltf_asset/`: retained document authoring, morph deltas, PNG/JPEG textures,
+  PBR materials, animation clips/import/sampling, and shared authoring byte APIs.
 
-## Fresh checks on the recovered published source
+## Fresh local baseline on that exact source
 
-- `cargo test --workspace --locked`: 51 fast tests passed, 5 opt-in tests ignored.
-- `cargo test -p anny-core --release --locked --test differentiation -- --ignored --nocapture`:
-  all five real-model directional cases passed without relaxing the tolerance.
-  Maximum absolute JVP differences: Anny LBS 1.4741e-10, Anny DQS 1.0154e-7,
-  MakeHuman LBS 7.6424e-9, MakeHuman-Procrustes 1.5724e-9, SOMA LBS 1.4510e-9.
-- The old orientation mismatch was already fixed in the published shared
-  quaternion/Jacobi projection. The previous note calling it active is superseded.
-- These are local checks; do not infer all CI/platform/browser checks passed.
-- Original 23-case Python reference qualification still needs a fresh run.
+Rust 1.90.0, locked vendored dependencies:
+- Workspace tests: **76 passed**, **6 opt-in tests ignored**.
+- `cargo fmt --all -- --check`: passed.
+- Workspace/all-target Clippy with warnings denied: passed.
+- This is not yet a new Python-reference, real-asset, browser or CI qualification.
+  The older 51-test checkpoint and notes saying post_gd is unwired are superseded.
 
-## Active next task
+## Active continuation
 
-Add a native optional Adam refinement stage using the verified parameter
-Jacobians and shape-prior derivatives. Preserve upstream rotation-vector,
-phenotype-logit, local/facial clamp and mean-square-loss semantics; explicitly
-document derivative conventions at piecewise boundaries. Do not call a finite-
-difference optimizer analytic or silently ignore unsupported options.
+Qualify the published implementation and close concrete remaining gaps. Start
+with a fresh 23-case Python forward-reference run after the shared-kernel changes,
+then targeted fitting/derivative, f32 and real language/browser checks. Check source
+and test failures before widening claims. Inspect glTF authoring and motion APIs
+for malformed-input and behavioral gaps; add small focused fixes/tests.
 
-## Remaining current phase
+## Remaining native-completeness checklist
 
-1. Complete and qualify native `post_gd` refinement and shared secondary access.
-2. Motion/AMASS workflow and fitting parity, aliases/helpers and binding coverage.
-3. Morph channels, texture/material authoring and animation import/roundtrip.
-4. Final f32, original Python forward-reference, derivative, fitting, collision,
-   C/C# runtime and actual browser smoke qualification (not a browser editor).
-5. Refresh capability docs and remove obsolete delivery/snapshot scaffolding.
+1. Fresh original forward references plus f32, derivative and real refinement tests.
+2. Fitting/AMASS workflow and helper/binding audit, explicitly separate synthetic
+   supplied-model tests from unavailable licensed real-model qualification.
+3. Independent glTF validation and authoring/animation round trips.
+4. Actual C/C# runtime and browser WASM smoke (not a character editor).
+5. Update capability/validation docs and PR ledger; remove obsolete delivery and
+   snapshot scaffolding after the source and recovery checkpoints are durable.
 
-## Later phase, explicitly deferred
+## Later phase, deliberately deferred
 
 - GPU/WebGPU backend.
 - SIMD tuning.
@@ -54,5 +55,5 @@ difference optimizer analytic or silently ignore unsupported options.
 - Complete browser character editor.
 - Broad performance optimization.
 
-Python-only API semantics and external licensed datasets absent from upstream
-are not requirements. Python reference tools are optional developer tools only.
+No external licensed assets are acquired. Python reference tooling is optional
+and developer-only; Cargo and the production library do not invoke Python.
