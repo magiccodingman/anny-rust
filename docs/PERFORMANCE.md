@@ -55,6 +55,25 @@ their recorded values to the last digit (skin weights `3.3306690738754696e-16`, 
 `4.0719240049225114e-8` / `3.7339730113439273e-8` / `1.723906197792502e-7`, soma `0e0`, JVP
 `1.474103678e-10`). Validation is not arithmetic; the equivalence was measured anyway.
 
+## Second defect of the same shape: eager `format!` in per-element checks
+
+`Tensor::checked_indices` / `TensorF32::checked_indices` iterated every element with
+`ensure(cond, format!("{name}: index {x} outside [0,{bound})"))`. `ensure` takes `impl Into<String>`,
+so that message was **built on every element even when the check passed** — one `String` allocation
+per index over mesh-size arrays (82,140 for the face array). The check now builds its message only on
+failure.
+
+| path | before | after |
+|---|---|---|
+| `Anthropometry::new` (module construction) | 7.873 ms | **0.552 ms** (14.3x) |
+| `KeypointsRegressor::coco` (module construction) | 30.594 ms | **2.136 ms** (14.3x) |
+| `derive measure` (end to end) | 8.497 ms | **1.479 ms** (5.7x) |
+| `SelfInterpenetrationModule::forward` | 53.739 ms | **47.576 ms** (1.13x) |
+
+The lesson generalizes: an `ensure(cond, format!(...))` inside a per-element loop is an allocation
+per element, and this codebase uses that pattern widely. Only the two call sites measured here were
+changed; the pattern should be treated as suspect wherever it appears on a hot path.
+
 ## Current state (post-fix, min / median ms)
 
 | operation | min | median |
@@ -110,17 +129,23 @@ and are exact-equivalence tested (`max difference 0e0` against `forward` on real
 all five pose conventions, plus bit-identical f32).
 
 **4. Collision is now the single biggest outlier by an order of magnitude.** `derive collision` costs
-64.6 ms — 113x a full generation of the same character. Unlike the scan, this is not obviously
-wasted work: `SelfInterpenetrationModule::new` builds a per-vertex `BTreeSet<String>` of bone labels
-and a per-face merged label set (13,718 sets and ~82k `String` clones over 27,420 faces), then
-`forward` searches for interpenetrating face partners. Construction is rebuilt per request and is
-string/allocation-heavy; the probe to separate construction from search has not been run yet, so the
-ratio between "avoidable per-call setup" and "intrinsic geometry work" is **not yet known** and is
-not claimed here.
+60.6 ms — ~100x a full generation of the same character. The split is now measured: module
+construction 15.1 ms, search 47.6 ms. Neither is a validation scan.
 
-**5. `derive measure` (8.5 ms) and `derive keypoints` (1.4 ms) also construct their module per
-request**, and `KeypointsRegressor::coco` reads a converted asset from the store each time. These are
-the same shape of finding as the collision module: a reusable object rebuilt per call.
+- Construction builds a per-vertex `BTreeSet<String>` of bone labels and a per-face merged label set
+  (13,718 sets, ~82k `String` clones over 27,420 faces). Strings here are pure overhead: labels are a
+  small fixed vocabulary and would be better interned as integer ids or bitsets.
+- Search rebuilds `MeshBvh::new(&v, &self.faces)` — a BVH over all 27,420 triangles — **inside the
+  per-batch loop**, then issues one AABB query per face, `sort_unstable()`s the candidate list, and
+  tests `masks[i].is_disjoint(&masks[j])` with `BTreeSet<String>` comparisons before the SAT test.
+  Rebuilding the acceleration structure per call and comparing strings per candidate pair are the two
+  obvious targets; how much of the 47.6 ms each accounts for has not been measured yet.
+
+**5. `derive measure` and `derive keypoints` construct their module per request**, which was the
+dominant cost until the eager-`format!` fix above (7.9 ms and 30.6 ms of construction respectively).
+After that fix construction is 0.55 ms and 2.14 ms, and `derive measure` end to end is 1.479 ms. A
+reusable toolkit object would still remove those remaining constructions, and `KeypointsRegressor::coco`
+re-reads a converted asset from the store on every call.
 
 **6. Load time is dominated by cold preparation (2.14 s) and by the 104.1 MB f32 payload reload
 (289 ms).** Startup cost for applications that ship a prepared model: ~0.29 s.

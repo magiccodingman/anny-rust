@@ -120,16 +120,19 @@ impl Tensor {
     }
     pub fn checked_indices(&self, bound: usize, name: &str) -> Result<Vec<usize>> {
         self.validate()?;
-        self.data
-            .iter()
-            .map(|&x| {
-                ensure(
-                    x >= 0. && x.fract() == 0. && x < bound as f64,
-                    format!("{name}: index {x} outside [0,{bound})"),
-                )?;
-                Ok(x as usize)
-            })
-            .collect()
+        // The failure message is built only when the check fails. `ensure(cond, format!(..))` builds
+        // its message eagerly, and this loop runs once per element over mesh-size arrays: ~82k
+        // allocations per call on the default model, which was 7.9 ms of an 8.5 ms `derive measure`.
+        let mut out = Vec::with_capacity(self.data.len());
+        for &x in &self.data {
+            if !(x >= 0. && x.fract() == 0. && x < bound as f64) {
+                return Err(Error::Invalid(format!(
+                    "{name}: index {x} outside [0,{bound})"
+                )));
+            }
+            out.push(x as usize);
+        }
+        Ok(out)
     }
     pub fn select(&self, axis: usize, indices: &[usize]) -> Result<Self> {
         ensure(

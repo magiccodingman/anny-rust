@@ -122,16 +122,18 @@ impl TensorF32 {
     }
     pub fn checked_indices(&self, bound: usize, name: &str) -> Result<Vec<usize>> {
         self.validate()?;
-        self.data
-            .iter()
-            .map(|&x| {
-                ensure(
-                    x >= 0. && x.fract() == 0. && (x as usize) < bound,
-                    format!("{name}: index {x} outside [0,{bound})"),
-                )?;
-                Ok(x as usize)
-            })
-            .collect()
+        // See `crate::tensor::Tensor::checked_indices`: building the message eagerly costs one
+        // allocation per element over mesh-size arrays.
+        let mut out = Vec::with_capacity(self.data.len());
+        for &x in &self.data {
+            if !(x >= 0. && x.fract() == 0. && (x as usize) < bound) {
+                return Err(Error::Invalid(format!(
+                    "{name}: index {x} outside [0,{bound})"
+                )));
+            }
+            out.push(x as usize);
+        }
+        Ok(out)
     }
     pub fn select(&self, axis: usize, indices: &[usize]) -> Result<Self> {
         ensure(
