@@ -10,7 +10,7 @@ use crate::{
     Error, Result, Tensor,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Measurements {
@@ -269,7 +269,12 @@ pub fn triangle_intersects_sat(a: [Vec3; 3], b: [Vec3; 3]) -> bool {
 /// Selection among multiple intersections is deterministic by face id, not GPU order.
 pub struct SelfInterpenetrationModule {
     faces: Tensor,
-    masks: Vec<BTreeSet<String>>,
+    /// Per-face bone-label ids, sorted and deduplicated.
+    ///
+    /// These used to be `BTreeSet<String>`, which cost ~82k `String` clones to build and a string
+    /// comparison walk on every candidate face pair. Label ids are interned once instead; the
+    /// disjointness test is now an integer merge walk.
+    masks: Vec<Vec<u32>>,
     n: usize,
 }
 impl SelfInterpenetrationModule {
@@ -308,25 +313,40 @@ impl SelfInterpenetrationModule {
                 }
             })
             .collect();
+        // Intern the label vocabulary once per module: masks are compared against each other far more
+        // often than they are built.
+        let mut vocabulary: HashMap<&str, u32> = HashMap::new();
+        let mut interned = Vec::with_capacity(labels.len());
+        for s in &labels {
+            let next = vocabulary.len() as u32;
+            interned.push(*vocabulary.entry(s.as_str()).or_insert(next));
+        }
         let weights = model.data.get("vertex_bone_weights")?;
         let ids = model.data.get("vertex_bone_indices")?;
         let k = weights.shape[1];
         let n = model.data.vertex_count();
-        let mut vm = vec![BTreeSet::new(); n];
+        let mut vm: Vec<Vec<u32>> = vec![Vec::new(); n];
         for v in 0..n {
+            let mask = &mut vm[v];
             for s in 0..k {
                 if weights.data[v * k + s] > 0. {
-                    vm[v].insert(labels[ids.data[v * k + s] as usize].clone());
+                    mask.push(interned[ids.data[v * k + s] as usize]);
                 }
             }
+            mask.sort_unstable();
+            mask.dedup();
         }
         let masks = faces
             .data
             .chunks_exact(3)
             .map(|f| {
-                f.iter()
-                    .flat_map(|&v| vm[v as usize].iter().cloned())
-                    .collect()
+                let mut mask: Vec<u32> = f
+                    .iter()
+                    .flat_map(|&v| vm[v as usize].iter().copied())
+                    .collect();
+                mask.sort_unstable();
+                mask.dedup();
+                mask
             })
             .collect();
         Ok(Self { faces, masks, n })
@@ -360,7 +380,7 @@ impl SelfInterpenetrationModule {
                 let mut candidates = bvh.overlapping_faces(lo, hi);
                 candidates.sort_unstable();
                 for j in candidates {
-                    if i == j || !self.masks[i].is_disjoint(&self.masks[j]) {
+                    if i == j || label_masks_intersect(&self.masks[i], &self.masks[j]) {
                         continue;
                     }
                     let ids = bvh.triangle_indices(j);
@@ -375,6 +395,26 @@ impl SelfInterpenetrationModule {
         Ok(out)
     }
 }
+/// Whether two sorted, deduplicated label-id masks share at least one label.
+///
+/// This is the inner test of the collision search and runs once per candidate face pair, so it is a
+/// merge walk over integers rather than a set comparison over strings. The predicate is stated
+/// positively on purpose: the previous `BTreeSet<String>::is_disjoint` call was used negated, and a
+/// mask test that returns the opposite of its name is exactly how a silent inversion happens.
+fn label_masks_intersect(a: &[u32], b: &[u32]) -> bool {
+    let (mut i, mut j) = (0, 0);
+    while i < a.len() && j < b.len() {
+        if a[i] < b[j] {
+            i += 1;
+        } else if a[i] > b[j] {
+            j += 1;
+        } else {
+            return true;
+        }
+    }
+    false
+}
+
 /// Mesh cleanup helpers use graph connectivity, not a third-party rendering engine.
 pub fn symmetric_vertex_indices(
     vertices: &Tensor,

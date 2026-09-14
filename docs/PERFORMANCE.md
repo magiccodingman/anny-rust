@@ -132,14 +132,22 @@ all five pose conventions, plus bit-identical f32).
 60.6 ms — ~100x a full generation of the same character. The split is now measured: module
 construction 15.1 ms, search 47.6 ms. Neither is a validation scan.
 
-- Construction builds a per-vertex `BTreeSet<String>` of bone labels and a per-face merged label set
-  (13,718 sets, ~82k `String` clones over 27,420 faces). Strings here are pure overhead: labels are a
-  small fixed vocabulary and would be better interned as integer ids or bitsets.
+- Construction built a per-vertex `BTreeSet<String>` of bone labels and a per-face merged label set
+  (13,718 sets, ~82k `String` clones over 27,420 faces). **Fixed**: labels are interned once into a
+  `u32` id vocabulary and the masks are sorted, deduplicated `Vec<u32>`; the pair test is a merge walk
+  over integers. Construction 12.565 → **2.677 ms**.
 - Search rebuilds `MeshBvh::new(&v, &self.faces)` — a BVH over all 27,420 triangles — **inside the
   per-batch loop**, then issues one AABB query per face, `sort_unstable()`s the candidate list, and
-  tests `masks[i].is_disjoint(&masks[j])` with `BTreeSet<String>` comparisons before the SAT test.
-  Rebuilding the acceleration structure per call and comparing strings per candidate pair are the two
-  obvious targets; how much of the 47.6 ms each accounts for has not been measured yet.
+  previously tested `masks[i].is_disjoint(&masks[j])` with `BTreeSet<String>` comparisons before the
+  SAT test. The string comparison was part of the cost: search 47.912 → **33.215 ms**. Rebuilding the
+  acceleration structure per call is still the main remaining cost here and is not addressed.
+- **The inversion this nearly shipped**: the first version of the interned test was named
+  `label_masks_disjoint` and used un-negated where the old code used `!is_disjoint`, which silently
+  changed the result from 940 to 27,420 reported partners. It was caught by recording an output digest
+  (partner count + index-weighted checksum) from the previous implementation and comparing, not by the
+  test suite, which had no collision coverage at all. That digest is now a test
+  (`tests/collision_native.rs`), and the predicate is named positively (`label_masks_intersect`) so the
+  same inversion reads as visibly wrong.
 
 **5. `derive measure` and `derive keypoints` construct their module per request**, which was the
 dominant cost until the eager-`format!` fix above (7.9 ms and 30.6 ms of construction respectively).
@@ -152,9 +160,9 @@ re-reads a converted asset from the store on every call.
 
 ## Ranking of remaining work, by measured upside
 
-1. **`derive collision` (64.6 ms)** — separate module construction from the search, then cut the
-   allocation-heavy setup (label interning instead of `String` sets) and any cacheable reuse. Needs a
-   measurement first.
+1. **`derive collision`'s BVH rebuild (33.2 ms search)** — the module now builds masks cheaply and the
+   pair test is integer-based, but `MeshBvh::new` over all 27,420 triangles still runs once per call.
+   That is the whole remaining cost of this path and the next measured target.
 2. **Per-character accumulation (~286 us/character)** — now the whole cost of generation. SIMD
    (explicitly vectorized f64/f32 kernels) and coefficient-blocked access. This is also what
    `batch generate x100` work in a population-scale job depends on.
