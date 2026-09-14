@@ -147,11 +147,41 @@ impl Tensor {
         let outer: usize = self.shape[..axis].iter().product();
         let mut shape = self.shape.clone();
         shape[axis] = indices.len();
-        let mut data = Vec::with_capacity(outer * indices.len() * inner);
-        for a in 0..outer {
-            for &i in indices {
-                let start = (a * self.shape[axis] + i) * inner;
-                data.extend_from_slice(&self.data[start..start + inner]);
+        let row = indices.len() * inner;
+        let mut data = vec![0.; outer * row];
+        // Rows along the leading axes are independent, so a big selection is spread over the cores.
+        // Each row lands in the same place the sequential loop would have put it, from the same source
+        // elements, which keeps the result bit-identical. Small selections stay sequential: the
+        // threads cost more than the copy.
+        let threads = std::thread::available_parallelism()
+            .map_or(1, std::num::NonZeroUsize::get)
+            .min(outer);
+        if threads > 1 && outer * row >= 1 << 20 {
+            let width = self.shape[axis];
+            let per = outer.div_ceil(threads);
+            std::thread::scope(|scope| {
+                for (chunk_id, chunk) in data.chunks_mut(per * row).enumerate() {
+                    let first = chunk_id * per;
+                    let source = &self.data;
+                    scope.spawn(move || {
+                        for (b, dst) in chunk.chunks_mut(row).enumerate() {
+                            let base = (first + b) * width * inner;
+                            for (j, &i) in indices.iter().enumerate() {
+                                let start = base + i * inner;
+                                dst[j * inner..(j + 1) * inner]
+                                    .copy_from_slice(&source[start..start + inner]);
+                            }
+                        }
+                    });
+                }
+            });
+        } else {
+            for a in 0..outer {
+                for (j, &i) in indices.iter().enumerate() {
+                    let start = (a * self.shape[axis] + i) * inner;
+                    data[a * row + j * inner..a * row + (j + 1) * inner]
+                        .copy_from_slice(&self.data[start..start + inner]);
+                }
             }
         }
         Ok(Self {

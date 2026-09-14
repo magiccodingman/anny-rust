@@ -311,11 +311,15 @@ impl AssetStore {
         vertices: &Tensor,
     ) -> Result<(Tensor, Tensor, Vec<String>)> {
         let n = vertices.shape[0];
-        let (mut shapes, mut masks, mut labels) = (Vec::new(), Vec::new(), Vec::new());
+        let (mut masks, mut labels) = (Vec::new(), Vec::new());
         let components: Vec<_> = PHENOTYPE_VARIATIONS
             .iter()
             .flat_map(|(_, v)| v.iter().copied())
             .collect();
+        // The selected macro targets, in selection order. The repository ships 1310 target files and a
+        // default configuration selects a few hundred of them, each a gzipped text file of up to 13,718
+        // rows; loaded one at a time they were the whole 2.14 s of `prepare default (cold)`.
+        let mut jobs: Vec<TargetJob> = Vec::new();
         for (block, keys) in [
             ("universal", vec!["gender", "age", "muscle", "weight"]),
             ("race", vec!["race", "gender", "age"]),
@@ -359,41 +363,52 @@ impl AssetStore {
                     }
                     _ => format!("breast/{basename}.target.gz"),
                 };
-                let file = self.root.join("mpfb2/targets").join(relative);
-                if block == "breast" && !file.is_file() {
+                let path = self.root.join("mpfb2/targets").join(relative);
+                if block == "breast" && !path.is_file() {
                     continue;
                 }
-                let mut shape = load_target(&file, n)?;
-                if newborn {
-                    let scale = [0.922, 0.922, 0.75];
-                    for (i, v) in shape.iter_mut().enumerate() {
-                        *v = scale[i % 3] * *v + (scale[i % 3] - 1.) / 3. * vertices.data[i];
-                    }
-                }
-                shapes.extend(shape);
-                labels.push(format!("{block}:{}", values.join("-")));
-                masks.extend(components.iter().map(|p| {
-                    if values.iter().any(|v| v == p) {
-                        1.
-                    } else {
-                        0.
-                    }
-                }));
+                jobs.push(TargetJob {
+                    label: format!("{block}:{}", values.join("-")),
+                    values,
+                    path,
+                    newborn,
+                });
             }
         }
-        let macro_count = labels.len();
+        let macro_count = jobs.len();
         let facial: Vec<String> = FACIAL_ACTION_LABELS.iter().map(|s| (*s).into()).collect();
         let selected = config.facial_actions.mask(&facial, false)?;
-        for (i, name) in facial.iter().enumerate() {
-            if selected[i] {
-                shapes.extend(load_target(
-                    &self
-                        .root
-                        .join(format!("faceunits01/targets/faceunits/{name}.target")),
-                    n,
-                )?);
-                labels.push(format!("facial_action:{name}"));
-            }
+        let facial_jobs: Vec<TargetJob> = facial
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| selected[*i])
+            .map(|(_, name)| TargetJob {
+                label: format!("facial_action:{name}"),
+                values: Vec::new(),
+                path: self
+                    .root
+                    .join(format!("faceunits01/targets/faceunits/{name}.target")),
+                newborn: false,
+            })
+            .collect();
+        // Macro targets and facial actions load in one pass. Their order in the job list is the order
+        // the shapes used to be appended in, so the tensor is unchanged; writing it directly is what
+        // removes the second copy of several hundred 329 KB shapes.
+        let mut all_jobs = jobs;
+        all_jobs.extend(facial_jobs);
+        let mut shapes = load_targets(&all_jobs, n, &vertices.data)?;
+        for job in &all_jobs[..macro_count] {
+            labels.push(job.label.clone());
+            masks.extend(components.iter().map(|p| {
+                if job.values.iter().any(|v| v == p) {
+                    1.
+                } else {
+                    0.
+                }
+            }));
+        }
+        for job in &all_jobs[macro_count..] {
+            labels.push(job.label.clone());
         }
         let metadata = self.json("mpfb2/targets/target.json")?;
         let mut locals = Vec::new();
@@ -668,40 +683,114 @@ fn world(v: Vec3, scale: f64) -> Vec3 {
     )
 }
 fn load_target(path: &Path, n: usize) -> Result<Vec<f64>> {
+    let mut out = vec![0.; n * 3];
+    load_target_into(path, &mut out)?;
+    Ok(out)
+}
+/// Read one target file into `out`. The buffer is zeroed first: rows the file does not mention
+/// stay zero, as upstream leaves them.
+fn load_target_into(path: &Path, out: &mut [f64]) -> Result<()> {
+    let n = out.len() / 3;
+    out.fill(0.);
     let file = std::fs::File::open(path)?;
     let reader: Box<dyn Read> = if path.extension().is_some_and(|x| x == "gz") {
         Box::new(flate2::read::GzDecoder::new(file))
     } else {
         Box::new(file)
     };
-    let mut out = vec![0.; n * 3];
     for (line_id, line) in BufReader::new(reader).lines().enumerate() {
         let line = line?;
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        let parts: Vec<_> = line.split_whitespace().collect();
-        ensure(
-            parts.len() == 4,
-            format!("{}:{} invalid target row", path.display(), line_id + 1),
-        )?;
-        let i = parts[0]
+        // Parse the row without allocating: the previous version collected a `Vec<&str>` per line and
+        // built the "invalid target row" message eagerly on every one of up to 13,718 lines.
+        let mut fields = line.split_whitespace();
+        let (Some(index), Some(x), Some(y), Some(z), None) = (
+            fields.next(),
+            fields.next(),
+            fields.next(),
+            fields.next(),
+            fields.next(),
+        ) else {
+            return Err(Error::Invalid(format!(
+                "{}:{} invalid target row",
+                path.display(),
+                line_id + 1
+            )));
+        };
+        let i = index
             .parse::<usize>()
             .map_err(|_| Error::Invalid("invalid target index".into()))?;
         ensure(i < n, "target index out of bounds")?;
-        let values = parts[1..]
-            .iter()
-            .map(|s| {
-                s.parse::<f64>()
-                    .map_err(|_| Error::Invalid("invalid target coordinate".into()))
-            })
-            .collect::<Result<Vec<_>>>()?;
-        let p = world(vec3(&values), 0.1);
+        let coordinate = |s: &str| {
+            s.parse::<f64>()
+                .map_err(|_| Error::Invalid("invalid target coordinate".into()))
+        };
+        let p = world(vec3(&[coordinate(x)?, coordinate(y)?, coordinate(z)?]), 0.1);
         out[i * 3..i * 3 + 3].copy_from_slice(p.as_slice());
     }
+    Ok(())
+}
+/// One selected target file to load, with the label and mask values it must produce.
+///
+/// Declared at module scope so the parallel loader can take a slice of jobs.
+struct TargetJob {
+    label: String,
+    values: Vec<String>,
+    path: PathBuf,
+    newborn: bool,
+}
+
+/// Load every job's target, in job order, into one contiguous buffer.
+///
+/// Each file is an independent gzip decode plus text parse, and the newborn rescale reads only the
+/// rest vertex tensor, so the work splits cleanly. Every thread owns a contiguous run of jobs and
+/// writes it straight into its own slice of the output, which keeps the result bit-identical to the
+/// sequential loop regardless of completion order and drops the per-shape allocations: the macro
+/// targets alone are several hundred shapes of 329 KB, and allocating then copying them cost more
+/// than decoding them.
+fn load_targets(jobs: &[TargetJob], n: usize, vertices: &[f64]) -> Result<Vec<f64>> {
+    let stride = n * 3;
+    let mut out = vec![0.; jobs.len() * stride];
+    if jobs.is_empty() {
+        return Ok(out);
+    }
+    // Every core the machine offers: the loads are a gzip decode plus a text parse, so they are CPU
+    // bound and a fixed cap just leaves cores idle (halving the cap on a 32-core host cost 1.5x).
+    let threads = std::thread::available_parallelism()
+        .map_or(1, std::num::NonZeroUsize::get)
+        .min(jobs.len());
+    let per = jobs.len().div_ceil(threads);
+    std::thread::scope(|scope| -> Result<()> {
+        let mut handles = Vec::new();
+        for (chunk_id, chunk) in out.chunks_mut(per * stride).enumerate() {
+            let start = chunk_id * per;
+            let mine = &jobs[start..start + chunk.len() / stride];
+            handles.push(scope.spawn(move || -> Result<()> {
+                for (job, slot) in mine.iter().zip(chunk.chunks_mut(stride)) {
+                    load_target_into(&job.path, slot)?;
+                    if job.newborn {
+                        let scale = [0.922, 0.922, 0.75];
+                        for (i, v) in slot.iter_mut().enumerate() {
+                            *v = scale[i % 3] * *v + (scale[i % 3] - 1.) / 3. * vertices[i];
+                        }
+                    }
+                }
+                Ok(())
+            }));
+        }
+        for handle in handles {
+            handle
+                .join()
+                .map_err(|_| Error::Invalid("target load thread panicked".into()))??;
+        }
+        Ok(())
+    })?;
     Ok(out)
 }
+
 fn combinations(keys: &[&str]) -> Vec<Vec<String>> {
     let mut result = vec![Vec::new()];
     for key in keys {

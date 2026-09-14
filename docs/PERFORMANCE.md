@@ -74,11 +74,85 @@ The lesson generalizes: an `ensure(cond, format!(...))` inside a per-element loo
 per element, and this codebase uses that pattern widely. Only the two call sites measured here were
 changed; the pattern should be treated as suspect wherever it appears on a hot path.
 
+## Startup: the cold prepare path
+
+`prepare default (cold)` was the largest number left in the project — 2140.970 ms, 36x the 59 ms reload
+of the payload it produces — and almost all of it was `AssetStore::build`. `perf` cannot sample here
+(`perf_event_paranoid=4`), so the phases were timed with temporary instrumentation (since removed; the
+split below is what it reported, on 32 cores).
+
+| phase | time | note |
+|---|---|---|
+| the 624 selected target files | 76-85 ms | parallel, written straight into the tensor; 117 ms when the thread count was capped at 16 |
+| rest of `load_blendshapes` | ~17 ms | local changes, target metadata, mask assembly |
+| `remove_unattached_vertices` | 45.7 ms | was 137.3 ms; the 205 MB blendshape gather is now spread over the cores |
+| rig archive and selection | 38.2 ms | |
+| `apply_orientation` | 14.0 ms | |
+| `load_obj` | 11.8 ms | |
+| other edits (filter_faces, compact, triangulate) | ~7.5 ms | |
+| **`build` total** | **229-245 ms** | was 2234-2473 ms |
+
+Four things were wrong, all of them the same shape as the earlier defects: work that is trivially
+independent was done one item at a time, and buffers were allocated and copied where a single pass
+would do.
+
+1. **An eager `format!` per row.** `load_target` collected a `Vec<&str>` per line and called
+   `ensure(len == 4, format!("{path}:{line} invalid target row"))`, allocating a `String` on every one
+   of up to 13,718 lines of every file, plus a `Vec<f64>` for the coordinates. The row is now matched
+   with a non-allocating `split_whitespace` pattern; the message is still built only on failure and the
+   error strings are byte-for-byte unchanged.
+2. **Serial loads.** The repository ships 1310 target files and a default configuration selects 624 of
+   them. Each is an independent gzip decode plus text parse, and they were loaded one at a time.
+   `load_targets` now spreads them over every core the machine offers (no arbitrary cap: capping at 16
+   on this 32-core host cost 1.5x) and every thread owns a contiguous run of jobs, so the output order
+   is the job order no matter what order the loads finish in.
+3. **A per-shape buffer and a second copy.** The loaded shapes were collected as one `Vec<f64>` each
+   (329 KB apiece, 205 MB in total), appended to a growing `Vec`, and copied again into the tensor.
+   They are now written directly into their final position in one pre-allocated buffer that becomes the
+   tensor, which removed an allocation, a copy and the reallocation traffic (measured at 154 ms of the
+   248 ms `load_blendshapes`). Macro targets and facial actions are loaded in a single pass for this,
+   in the same order they used to be appended in.
+4. **A serial gather.** `remove_unattached_vertices` genuinely drops 5,440 of the base mesh's 19,158
+   vertices, and `Tensor::select` did it row by row in one thread — 205 MB of gathering for the
+   blendshapes alone. `select` now spreads the leading-axis rows over the cores when the result exceeds
+   a million elements (8 MB of f64; below that the threads cost more than the copy). Every element still comes from the same source
+   element into the same destination index.
+
+| path | before | after |
+|---|---|---|
+| `prepare default (cold)` (bench, min / median) | 2140.970 / 2171.778 ms | **222.905 / 223.763 ms** (9.6x) |
+| `AssetStore::build` alone (recorded several times per round, min) | 2234 ms | 229 ms |
+
+Equivalence evidence, since "same output" is the entire point:
+
+- The serialized payload's **tensor region** is byte-identical between the sequential and the parallel
+  build: `sha256 582aec10eda939b71619ca10d4d84d576d206841f336a34240030a743666011b` over all 109,192,480
+  bytes that follow the header, reproduced on two runs of each version, and again after each of the four
+  changes above. It is now a permanent test: `tests/prepare_equivalence.rs`.
+- Every real-data oracle still passes: `real_model_collision_matches_the_recorded_digest` (the recorded
+  collision digest), `prepared_payload`, `native_import` (all committed tensor archives still match the
+  Python conversion), `pose_session`, `differentiation`, `authoring`.
+- The bench rows outside the prepare group are unchanged, so nothing here traded against generation or
+  the session path.
+
+### The serialized payload is not byte-reproducible, and that matters for how it is tested
+
+Setting up that comparison produced a *different* whole-file digest on every run of the same binary.
+The cause is not the parallel loader: `Anny::archive` and `AnnyF32::to_bytes` build the safetensors
+`__metadata__` map as a `std::collections::HashMap`, and `safetensors::serialize` iterates that map, so
+the header's JSON key order follows the process's random hash seed. The tensors themselves are
+deterministic — `Archive::tensors` is a `BTreeMap` — and across every run compared, all 14 payload
+tensors were identical.
+
+So a whole-file digest is not a usable oracle for this artifact; compare the tensor region or per-tensor
+hashes instead. Two builds of one configuration differ in header bytes only. The prepared-model cache is
+unaffected: it keys on config plus asset fingerprint and verifies the sha256 it wrote itself.
+
 ## Current state (post-fix, min / median ms)
 
 | operation | min | median |
 |---|---|---|
-| `prepare default (cold)` | 2140.970 ms | 2171.778 ms |
+| `prepare default (cold)` | 222.905 ms | 223.763 ms |
 | `reload prepared f32 bytes` (104.1 MB payload) | 58.128 ms | 59.003 ms |
 | `generate f64 default` | 0.572 ms | 0.600 ms |
 | `generate f64 dqs` | 1.331 ms | 1.443 ms |
@@ -223,18 +297,22 @@ per-tensor validity scan.
    optimization.
 3. **`derive measure` (8.5 ms)** — find out whether it is the measurement's geometry queries or its
    per-request construction.
-4. **Startup: cold preparation is now the whole story (2.14 s prepare / 59.0 ms reload).** The 104.1 MB
-   payload load is down from 289 ms; what is left is one copy plus a full validity scan, so the next
-   step is mmap or zero-copy (`safetensors` exposes the buffer; validating lazily on first use would
-   trade the scan for weaker guarantees and needs a deliberate decision), or avoiding materializing
-   blendshapes a configuration never uses. Cold preparation (2.14 s) has not been attacked at all.
+4. **Startup: cold preparation is down to 222.9 ms (was 2140.9 ms, 9.6x) and reload is 60.5 ms.** The
+   remaining prepare cost is spread thin — the 624 target files at 76-85 ms, the vertex gather at
+   45.7 ms, the rig archive at 38.2 ms, orientation at 14.0 ms, `load_obj` at 11.8 ms — so no single
+   step is worth a rewrite any more. The 104.1 MB payload reload is one copy plus a full validity scan;
+   the next step there is mmap or zero-copy (`safetensors` exposes the buffer; validating lazily on
+   first use would trade the scan for weaker guarantees and needs a deliberate decision), or avoiding
+   materializing blendshapes a configuration never uses.
 5. **GPU/WebGPU, Unity integration, browser editor, C/C#/WASM session exposure** — untouched. The
    session API exists only in Rust (`Anny::pose_session`, `AnnyF32::pose_session`); no CLI, C, WASM or
    C# surface exposes it yet, so the 1.5-2x is not reachable from those callers.
 
 ## Status
 
-Two optimizations are implemented and measured: the validation-scan fix (16-18x on every generation
-path) and the pose session (1.5-2x on repeated re-posing). Both are exact-equivalence tested against
-the unoptimized path. Everything in the ranking above is *not* done, and no row in this document is a
-real-time performance guarantee outside the measured host.
+Optimizations implemented and measured, every one bit-equivalence tested against the path it replaced:
+the validation-scan fix (16-18x on every generation path), the pose session (1.5-2x on repeated
+re-posing), the collision BVH buffer reuse (2.17x), the direct f32 prepared-payload decode (4.9x), and
+the cold prepare path (9.6x, with its tensor digest pinned by `tests/prepare_equivalence.rs`). Everything
+in the ranking above is *not* done, and no row in this document is a real-time performance guarantee
+outside the measured host.
