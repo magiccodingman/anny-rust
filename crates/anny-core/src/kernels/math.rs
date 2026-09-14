@@ -97,19 +97,86 @@ pub fn legacy_roll_y(roll: Scalar) -> Mat3 {
         d as Scalar,
     )
 }
-/// Closest proper rotation. Reflection correction follows roma.special_procrustes.
+/// Closest proper rotation, including reflection correction.
+///
+/// Maximize tr(R^T M) via the largest eigenvector of the symmetric quaternion
+/// matrix. A scaled cyclic Jacobi solve avoids forming M^T M and the small
+/// discontinuities of the fixed-size SVD on nearly block-diagonal covariances.
+/// This matters for directional derivatives, not just the forward residual.
 pub fn special_procrustes(m: &Mat3) -> Mat3 {
-    if m.norm_squared() == 0. {
+    let scale = m.amax();
+    if scale == 0. {
         return Mat3::identity();
     }
-    let s = m.svd(true, true);
-    let u = s.u.unwrap();
-    let vt = s.v_t.unwrap();
-    let mut d = Mat3::identity();
-    if (u * vt).determinant() < 0. {
-        d[(2, 2)] = -1.;
+    let a = m / scale;
+    let (xx, yy, zz) = (a[(0, 0)], a[(1, 1)], a[(2, 2)]);
+    // Quaternion order is x, y, z, w. The quadratic form is tr(R(q)^T M).
+    let mut k = Mat4::new(
+        xx - yy - zz,
+        a[(0, 1)] + a[(1, 0)],
+        a[(0, 2)] + a[(2, 0)],
+        a[(2, 1)] - a[(1, 2)],
+        a[(0, 1)] + a[(1, 0)],
+        yy - xx - zz,
+        a[(1, 2)] + a[(2, 1)],
+        a[(0, 2)] - a[(2, 0)],
+        a[(0, 2)] + a[(2, 0)],
+        a[(1, 2)] + a[(2, 1)],
+        zz - xx - yy,
+        a[(1, 0)] - a[(0, 1)],
+        a[(2, 1)] - a[(1, 2)],
+        a[(0, 2)] - a[(2, 0)],
+        a[(1, 0)] - a[(0, 1)],
+        xx + yy + zz,
+    );
+    let mut vectors = Mat4::identity();
+    for _ in 0..32 {
+        let mut changed = false;
+        for p in 0..3 {
+            for q in p + 1..4 {
+                let off = k[(p, q)];
+                if off.abs() <= Scalar::EPSILON * k.amax() {
+                    continue;
+                }
+                changed = true;
+                let tau = (k[(q, q)] - k[(p, p)]) / (2. * off);
+                let t = tau.signum() / (tau.abs() + tau.hypot(1.));
+                let c = 1. / (1. + t * t).sqrt();
+                let s = t * c;
+                k[(p, p)] -= t * off;
+                k[(q, q)] += t * off;
+                k[(p, q)] = 0.;
+                k[(q, p)] = 0.;
+                for i in 0..4 {
+                    if i != p && i != q {
+                        let x = k[(i, p)];
+                        let y = k[(i, q)];
+                        k[(i, p)] = c * x - s * y;
+                        k[(p, i)] = k[(i, p)];
+                        k[(i, q)] = s * x + c * y;
+                        k[(q, i)] = k[(i, q)];
+                    }
+                    let x = vectors[(i, p)];
+                    let y = vectors[(i, q)];
+                    vectors[(i, p)] = c * x - s * y;
+                    vectors[(i, q)] = s * x + c * y;
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
     }
-    u * d * vt
+    let mut largest = 0;
+    for i in 1..4 {
+        if k[(i, i)] > k[(largest, largest)] {
+            largest = i;
+        }
+    }
+    let q = vectors.column(largest).normalize();
+    UnitQuaternion::new_normalize(nalgebra::Quaternion::new(q[3], q[0], q[1], q[2]))
+        .to_rotation_matrix()
+        .into_inner()
 }
 pub fn linear_interpolation(
     value: Scalar,
