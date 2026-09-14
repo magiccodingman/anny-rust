@@ -13,11 +13,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Snapshot tracked source
+      - uses: dtolnay/rust-toolchain@1.90.0
+      - name: Snapshot tracked source and locked dependencies
         run: |
           mkdir -p /tmp/v1-source
           git archive HEAD | gzip > /tmp/v1-source/source.tar.gz
           git rev-parse HEAD > /tmp/v1-source/commit.txt
+          cargo vendor --locked /tmp/v1-source/vendor > /tmp/v1-source/vendor-config.toml
+          tar -czf /tmp/v1-source/vendor.tar.gz -C /tmp/v1-source vendor
+          rm -rf /tmp/v1-source/vendor
       - uses: actions/upload-artifact@v4
         with:
           name: v1-source
