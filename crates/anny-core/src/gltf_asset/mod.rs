@@ -3,7 +3,11 @@
 //! Only glTF 2.0 without extensions and supported triangle geometry is accepted.
 //! Image payloads remain opaque PNG/JPEG bytes; no renderer is embedded.
 mod animation;
+mod authoring;
 pub use animation::{AnimationChannel, AnimationClip, AnimationPath, Interpolation};
+pub use authoring::{
+    AlphaMode, MorphDeltas, PbrMaterial, TextureFilter, TextureOptions, TextureReference, WrapMode,
+};
 
 use crate::{
     ensure,
