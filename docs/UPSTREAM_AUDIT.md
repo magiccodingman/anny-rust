@@ -25,7 +25,7 @@ deliberately differs it says so and says why.
 | Upstream | Native equivalent | State |
 |---|---|---|
 | `examples/amass_to_anny.py` | `anny amass-inspect`, `anny amass-fit`; `anny_core::motion` | DONE |
-| `examples/benchmark.py` | `crates/anny-core/benches` (native release benchmarks) | DONE — see `docs/PERFORMANCE.md` |
+| `examples/benchmark.py` | `anny benchmark` (single-configuration forward timing with a JSON report) and `cargo bench -p anny-core` (configuration matrix, batching, prepare/reload, secondary operations) | DONE — see `docs/PERFORMANCE.md` |
 | `examples/benchmark_compile.py` | Not applicable as such: the native build is already ahead-of-time compiled. The useful goal (measure the compiled path against a naive one) is covered by the same native benchmarks. | NOT REQUIRED (literal `torch.compile`) |
 | `examples/mesh_to_params.py` | `anny fit`, `anny_core::fitting` (known-index, closest-surface, landmark similarity init, multistart) | DONE |
 | `examples/smpl_comparison.py` | `anny_core::smpl` SMPL/SMPL-X adapter; caller-supplied licensed model | DONE (capability) / EXTERNAL (data) |
@@ -151,8 +151,12 @@ names with no direct native equivalent, and why that is acceptable:
   ignored tests mirroring upstream `test_pose_transfer.py`, including the makehuman→anny direction
   that has to reproduce the posed mesh.
 - `segment_faces` had no test. It now has a real-data disjointness/union test.
-- There were no benchmarks in the workspace at all, which the performance and GPU phases both
-  require as a baseline. `crates/anny-core/benches` now provides them.
+- Benchmarks existed only as the `anny benchmark` command, which times a single forward pass in the
+  default f64 configuration. `crates/anny-core/benches/runtime.rs` (`cargo bench -p anny-core`) now
+  covers the configuration matrix (f64/f32, LBS/DQS, anny/makehuman rigs, all-phenotype and
+  local+facial selections), batch generation at 1/10/100 characters, cold prepare, prepared-payload
+  reload, and the secondary operations. Both the performance and GPU phases need that spread as a
+  baseline.
 - Four upstream tutorial workflows (`alternative_models`, `pose_parameterization`, `pose_transfer`,
   `shape_parameterization`) had no discoverable native documentation entry point. See the tutorials
   table above.

@@ -173,6 +173,32 @@ Unsupported extensions/compression/codecs are not silently interpreted as equiva
 
 These make the relevant secondary data explicit/portable rather than depending on Python objects.
 
+## Pose transfer between rigs
+
+Upstream's `pose_transfer` tutorial moves a posed configuration from one rig to another without
+going through Python. The native equivalent is
+`anny_core::tools::transfer_pose_parameters(&source, &target, &parameters, mode)`.
+
+The rules are deliberate and match upstream's `test_pose_transfer.py`:
+
+- the target's bone names must all exist in the source rig, otherwise the call errors naming the
+  missing bone — never silently fall back to joint indices;
+- source and target must share the same rest geometry (checked, not assumed);
+- the result is the source pose re-expressed against the target's rest orientations, so a mesh posed
+  with the source model and the same mesh posed with the transferred parameters agree. Real-data
+  qualification: makehuman→anny over 104 shared bones reproduces the posed mesh to `3.013e-6`
+  (upstream asserts `< 1e-4`).
+
+Related workflows:
+
+| Upstream tutorial | Native entry point |
+|---|---|
+| `pose_parameterization` | the five pose conventions (`PoseParameterization`) plus `anny query` pose-convert requests; `docs/COMPATIBILITY.md` |
+| `shape_parameterization` | `Parameters` phenotype kwargs, local changes, `interpolate_model_data` / `interpolate_skinning_weights`, sampling |
+| `alternative_models` | `TopologySpec` / `RigSpec` alternates (`soma`, `smpl`, `smplx`, `makehuman`, game-engine variants) and the SMPL-X adapter; `docs/COMPATIBILITY.md`, `docs/NATIVE_IMPORT.md` |
+| `texture` | `docs/SCENES_AND_MESH_IO.md` (material/texture authoring and embedding) |
+| `keypoints` | `KeypointsRegressor::coco` with an optional explicit label list, used through `Request::Keypoints` by the C/C#/WASM surfaces |
+
 ## Benchmark command
 
 ```sh
@@ -183,4 +209,13 @@ These make the relevant secondary data explicit/portable rather than depending o
   --report output/benchmark.json
 ```
 
-The benchmark is a reproducible CPU timing harness, not a real-time performance guarantee. GPU/WebGPU, SIMD and the broader profiling/optimization phase are intentionally deferred until after native-v1 correctness/portability.
+`anny benchmark` times one forward evaluation in the default f64 configuration and writes a JSON
+report. For the configuration matrix, batching behaviour, prepare/reload cost and the secondary
+operations, use the native benchmark harness:
+
+```sh
+cargo bench -p anny-core --bench runtime
+```
+
+Both are reproducible CPU timing harnesses, not real-time performance guarantees. Baseline numbers
+and what they imply are recorded in `docs/PERFORMANCE.md`.
