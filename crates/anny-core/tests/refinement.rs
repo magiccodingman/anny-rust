@@ -249,3 +249,156 @@ fn shared_initial_phenotypes_are_validated() {
     )
     .is_err());
 }
+
+#[test]
+fn shared_phenotype_logits_use_the_sum_of_batch_gradients() {
+    let mut model = common::tiny();
+    model
+        .data
+        .arrays
+        .get_mut("stacked_phenotype_blend_shapes_mask")
+        .unwrap()
+        .data[17] = 1.;
+    model.data.arrays.get_mut("blendshapes").unwrap().data[3] = 0.4;
+    let initial = Parameters {
+        phenotype_kwargs: json!({"height":0.3}),
+        facial_actions: json!({"jawOpen":[0.2,0.7]}),
+        ..Default::default()
+    };
+    let desired = Parameters {
+        phenotype_kwargs: json!({"height":0.8}),
+        ..initial.clone()
+    };
+    let target = model.forward(&desired).unwrap();
+    let options = RefinementOptions {
+        steps: 160,
+        learning_rate: 0.1,
+        shared_phenotypes: true,
+        selection: Some(ParameterSelection {
+            phenotypes: vec!["height".into()],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let result = refine(
+        &model,
+        target.get("vertices").unwrap(),
+        &initial,
+        &options,
+        None,
+    )
+    .unwrap();
+    let ph = anny_core::model::parse_values(
+        &result.parameters.phenotype_kwargs,
+        &model.phenotype_labels,
+        0.5,
+        "ph",
+    )
+    .unwrap();
+    let h = model
+        .phenotype_labels
+        .iter()
+        .position(|n| n == "height")
+        .unwrap();
+    assert_eq!(ph.data[h], ph.data[ph.shape[1] + h]);
+    assert!((ph.data[h] - 0.8).abs() < 0.001);
+    assert!(result.losses.last().unwrap() < &(result.losses[0] * 1e-5));
+}
+
+#[test]
+fn supplied_calibrated_prior_drives_logit_optimization() {
+    use anny_core::distribution::{
+        ConditionalBetaDistribution, MorphologicalAgeMapping, SimpleShapeDistribution,
+    };
+    let model = common::tiny();
+    let beta = ConditionalBetaDistribution {
+        age_anchors: vec![0., 1.],
+        alpha_anchors: vec![2., 2.],
+        beta_anchors: vec![2., 2.],
+    };
+    let groups = ["height", "weight", "muscle", "proportions"]
+        .map(|s| (s.to_string(), beta.clone()))
+        .into();
+    let prior = SimpleShapeDistribution {
+        age_mapping: MorphologicalAgeMapping {
+            anny_age_anchors: vec![0., 1.],
+            morphological_age_anchors: vec![0., 100.],
+        },
+        boys: groups,
+        girls: ["height", "weight", "muscle", "proportions"]
+            .map(|s| (s.to_string(), beta.clone()))
+            .into(),
+        phenotype_labels: model.phenotype_labels.clone(),
+    };
+    let initial = Parameters {
+        phenotype_kwargs: json!({"height":0.2}),
+        ..Default::default()
+    };
+    let target = model.forward(&initial).unwrap();
+    let options = RefinementOptions {
+        steps: 100,
+        learning_rate: 0.05,
+        prior_weight: 1.,
+        selection: Some(ParameterSelection {
+            phenotypes: vec!["height".into()],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let result = refine(
+        &model,
+        target.get("vertices").unwrap(),
+        &initial,
+        &options,
+        Some(&prior),
+    )
+    .unwrap();
+    let ph = anny_core::model::parse_values(
+        &result.parameters.phenotype_kwargs,
+        &model.phenotype_labels,
+        0.5,
+        "ph",
+    )
+    .unwrap();
+    let h = model
+        .phenotype_labels
+        .iter()
+        .position(|n| n == "height")
+        .unwrap();
+    assert!((ph.data[h] - 0.5).abs() < 0.005);
+    assert!(result.losses.last().unwrap() < &result.losses[0]);
+}
+
+#[test]
+#[ignore = "real-asset analytic refinement qualification"]
+fn real_body_analytic_refinement_reduces_reconstruction_loss() {
+    let store = anny_core::assets::AssetStore::new(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data"),
+    );
+    let m = store.build(&Default::default()).unwrap();
+    let target = m
+        .forward(&Parameters {
+            phenotype_kwargs: json!({"height":0.7}),
+            ..Default::default()
+        })
+        .unwrap();
+    let options = RefinementOptions {
+        steps: 3,
+        learning_rate: 0.05,
+        selection: Some(ParameterSelection {
+            phenotypes: vec!["height".into()],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let result = refine(
+        &m,
+        target.get("vertices").unwrap(),
+        &Parameters::default(),
+        &options,
+        None,
+    )
+    .unwrap();
+    println!("real height refinement: {:?}", result.losses);
+    assert!(result.losses.last().unwrap() < &(result.losses[0] * 0.9));
+}
