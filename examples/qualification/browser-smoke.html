@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Anny WASM qualification</title>
+<pre id="result">Running native WebAssembly lifecycle checks...</pre>
+<script type="module">
+import init, { AnnyModel, GltfDocument } from '../browser/pkg/anny_wasm.js';
+const checks = [];
+const handles = new Set();
+const own = x => (handles.add(x), x);
+const dispose = x => { x.free(); handles.delete(x); };
+const check = (condition, message) => {
+  if (!condition) throw new Error(message);
+  checks.push(message);
+};
+const finite = xs => Array.from(xs).every(Number.isFinite);
+try {
+  await init();
+  const modelPath = new URLSearchParams(location.search).get('model') || 'output/ci-model.safetensors';
+  const response = await fetch('/' + modelPath);
+  if (!response.ok) throw new Error(`model HTTP ${response.status}`);
+  const model = own(new AnnyModel(new Uint8Array(await response.arrayBuffer())));
+  const parameters = JSON.stringify({phenotype_kwargs: {height: 0.6, weight: 0.4}});
+  const output = own(model.evaluate(parameters));
+  const vertices = output.tensor('vertices');
+  const shape = output.shape('vertices');
+  const faces = model.indices('faces');
+  check(vertices instanceof Float64Array && finite(vertices) && vertices.length > 0, 'owned f64 evaluation');
+  check(faces instanceof Uint32Array && faces.length > 0 && shape[0] === 1 && shape[2] === 3, 'integer connectivity and output shape');
+  const first = Array.from(vertices.slice(0, 30));
+  const single = own(model.to_f32());
+  const singleOutput = own(single.evaluate(parameters));
+  const singleVertices = singleOutput.tensor('vertices');
+  check(singleVertices instanceof Float32Array && singleVertices.length === vertices.length && finite(singleVertices), 'owned f32 evaluation');
+  let maxError = 0;
+  for (let i = 0; i < vertices.length; ++i) maxError = Math.max(maxError, Math.abs(vertices[i] - singleVertices[i]));
+  check(maxError < 2e-4, 'f32/f64 position tolerance');
+  dispose(single); dispose(singleOutput);
+  check(Number.isFinite(singleVertices[0]), 'f32 arrays survive result and model disposal');
+  const measurements = JSON.parse(model.query(JSON.stringify({operation: 'measure', parameters: JSON.parse(parameters)})));
+  check(measurements.height[0] > 0, 'secondary measurement query');
+  const jvp = JSON.parse(model.query(JSON.stringify({operation: 'jvp', direction: {phenotypes: {height: 1}}})));
+  check(jvp.vertices != null, 'analytic derivative query');
+  const refined = JSON.parse(model.query(JSON.stringify({operation: 'refine', target: {shape: Array.from(shape), data: Array.from(vertices)}, options: {steps: 1, learning_rate: 0.05, selection: {phenotypes: ['height']}}})));
+  check(refined.losses.length === 2 && refined.losses.every(Number.isFinite), 'native Adam refinement query');
+  let rejected = false;
+  try { model.query('{"operation":"does-not-exist"}'); } catch (_) { rejected = true; }
+  check(rejected, 'native errors become caught JavaScript exceptions');
+  const glb = model.export_glb(parameters, '{"rigged":true}');
+  check(glb instanceof Uint8Array && new TextDecoder().decode(glb.slice(0, 4)) === 'glTF', 'rigged GLB bytes');
+  const document = own(new GltfDocument(glb));
+  const graph = JSON.parse(document.query('{"operation":"document"}'));
+  const rootBone = graph.skins[0].joints[0];
+  const edits = [{op: 'set-material', mesh: 0, primitive: 0, material: {name: 'browser-material', roughness: 0.4}}, {op: 'add-animation', clip: {name: 'browser-clip', channels: [{node: rootBone, path: 'translation', interpolation: 'LINEAR', times: [0.1, 0.2], width: 3, values: [0,0,0, 0.1,0,0]}]}}];
+  document.edit(JSON.stringify(edits));
+  const authored = document.glb();
+  const reimported = own(new GltfDocument(authored));
+  const clips = JSON.parse(reimported.query('{"operation":"clips"}'));
+  check(clips.length === 1 && clips[0].channels[0].times.length === 2, 'retained animation/material authoring round trip');
+  const info = JSON.parse(reimported.query('{"operation":"describe"}'));
+  check(info.materials > 0 && info.skins === 1, 'authoring preserves rig');
+  dispose(reimported); dispose(document);
+  const prepared = model.prepared_bytes();
+  dispose(output); dispose(model);
+  check(first.every((x, i) => vertices[i] === x), 'f64 arrays survive memory growth and disposal');
+  const reloaded = own(new AnnyModel(prepared));
+  const regenerated = own(reloaded.evaluate(parameters));
+  const again = regenerated.tensor('vertices');
+  check(first.every((x, i) => again[i] === x), 'prepared model reload is deterministic');
+  window.__anny_result = {status: 'passed', checks, vertices: shape[1], indexEntries: faces.length, maxPositionError: maxError};
+} catch (error) {
+  window.__anny_result = {status: 'failed', checks, error: String(error), stack: error?.stack};
+} finally {
+  for (const handle of handles) handle.free();
+  document.querySelector('#result').textContent = JSON.stringify(window.__anny_result, null, 2);
+}
+</script></html>
