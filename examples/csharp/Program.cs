@@ -39,5 +39,31 @@ using var gltfInfo = JsonDocument.Parse(AnnyGltf.Query(edited));
 if (gltfInfo.RootElement.GetProperty("meshes").GetInt32() != 1) throw new InvalidDataException("glTF edit lost mesh.");
 using var derivative = JsonDocument.Parse(model.Query("{\"operation\":\"jvp\",\"direction\":{\"phenotypes\":{\"height\":1.0}}}"));
 _ = derivative.RootElement.GetProperty("vertices");
-Console.WriteLine("Native glTF document edit/query and analytic JVP through C#: PASS");
+var tensorShape = new[] { 1, mesh.Vertices.Length / 3, 3 };
+var cotangents = Enumerable.Repeat(1.0, mesh.Vertices.Length).ToArray();
+var vjpRequest = JsonSerializer.Serialize(new
+{
+    operation = "vjp",
+    selection = new { phenotypes = new[] { "height" } },
+    cotangents = new { vertices = new { shape = tensorShape, data = cotangents } }
+});
+using var transpose = JsonDocument.Parse(model.Query(vjpRequest));
+if (!transpose.RootElement.TryGetProperty("phenotypes", out var phenotypeGradient)
+    || !phenotypeGradient.TryGetProperty("height", out _))
+    throw new InvalidDataException("C# VJP did not return the selected phenotype gradient.");
+var refineRequest = JsonSerializer.Serialize(new
+{
+    operation = "refine",
+    target = new { shape = tensorShape, data = mesh.Vertices },
+    options = new
+    {
+        steps = 1,
+        learning_rate = 0.01,
+        selection = new { phenotypes = new[] { "height" } }
+    }
+});
+using var refined = JsonDocument.Parse(model.Query(refineRequest));
+if (!refined.RootElement.TryGetProperty("losses", out var losses) || losses.GetArrayLength() < 2)
+    throw new InvalidDataException("C# refinement did not execute an Adam step.");
+Console.WriteLine("Native glTF edit/query plus JVP/VJP/refinement through C#: PASS");
 return 0;
