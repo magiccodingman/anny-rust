@@ -21,6 +21,8 @@ pub struct InverterOptions {
     pub joint_top_k: Option<usize>,
     pub identity_bone_labels: Vec<String>,
     pub regularization: BTreeMap<String, f64>,
+    /// Explicit calibration for an optional post_gd shape prior.
+    pub shape_prior: Option<crate::distribution::SimpleShapeDistribution>,
 }
 impl Default for InverterOptions {
     fn default() -> Self {
@@ -32,6 +34,7 @@ impl Default for InverterOptions {
             joint_top_k: Some(1024),
             identity_bone_labels: vec![],
             regularization: BTreeMap::new(),
+            shape_prior: None,
         }
     }
 }
@@ -46,6 +49,12 @@ pub struct FitOptions {
     pub max_delta: f64,
     pub shared_phenotypes: bool,
     pub multistart: BTreeMap<String, Vec<f64>>,
+    pub post_gd: bool,
+    pub post_gd_steps: usize,
+    pub post_gd_lr: f64,
+    pub post_gd_prior_weight: f64,
+    pub post_gd_optimize_local_changes: bool,
+    pub post_gd_optimize_facial_actions: bool,
 }
 impl Default for FitOptions {
     fn default() -> Self {
@@ -58,6 +67,12 @@ impl Default for FitOptions {
             max_delta: 0.1,
             shared_phenotypes: false,
             multistart: BTreeMap::new(),
+            post_gd: false,
+            post_gd_steps: 100,
+            post_gd_lr: 1e-3,
+            post_gd_prior_weight: 0.,
+            post_gd_optimize_local_changes: false,
+            post_gd_optimize_facial_actions: false,
         }
     }
 }
@@ -68,13 +83,16 @@ pub struct FitResult {
     pub output: ModelOutput,
     pub mean_vertex_error: Vec<f64>,
     pub iterations: usize,
+    /// Empty when refinement was disabled; initial loss plus each Adam step otherwise.
+    pub post_gd_losses: Vec<f64>,
 }
 impl FitResult {
     pub fn to_json(&self) -> Value {
-        json!({"parameters":self.parameters,"mean_vertex_error":self.mean_vertex_error,"iterations":self.iterations})
+        json!({"parameters":self.parameters,"mean_vertex_error":self.mean_vertex_error,"iterations":self.iterations,"post_gd_losses":self.post_gd_losses})
     }
 }
-/// CPU fitting does not require automatic differentiation. All matrices and
+/// The baseline uses finite differences/registration; optional post_gd uses native
+/// analytic parameter gradients. All matrices and
 /// regularized solves are f64; iteration trajectories need not match torch f32.
 pub struct AnnyInverter<'a> {
     model: &'a Anny,
@@ -462,6 +480,28 @@ impl<'a> AnnyInverter<'a> {
             options.max_delta > 0. && options.max_delta.is_finite(),
             "max_delta must be positive",
         )?;
+        if options.post_gd {
+            ensure(
+                options.post_gd_steps <= 10_000
+                    && options.post_gd_lr.is_finite()
+                    && options.post_gd_lr > 0.,
+                "invalid post_gd steps/learning rate",
+            )?;
+            ensure(
+                options.post_gd_prior_weight.is_finite() && options.post_gd_prior_weight >= 0.,
+                "invalid post_gd prior weight",
+            )?;
+            if options.post_gd_prior_weight > 0. {
+                ensure(
+                    self.options.shape_prior.is_some(),
+                    "post_gd prior requires supplied shape calibration",
+                )?;
+                ensure(
+                    options.optimize_phenotypes,
+                    "post_gd prior requires phenotype optimization",
+                )?;
+            }
+        }
         for key in &options.excluded_phenotypes {
             ensure(
                 self.model.phenotype_labels.contains(key),
@@ -524,9 +564,9 @@ impl<'a> AnnyInverter<'a> {
                 best = Some((state, e));
             }
         }
-        let (state, mean_vertex_error) = best.unwrap();
-        let output = self.evaluate(&state)?;
-        let vertices = self.vertices(&output)?;
+        let (state, mut mean_vertex_error) = best.unwrap();
+        let mut output = self.evaluate(&state)?;
+        let mut vertices = self.vertices(&output)?;
         let mut parameters = self.parameters(&state);
         parameters.pose_parameters = self
             .model
@@ -546,12 +586,81 @@ impl<'a> AnnyInverter<'a> {
                     .collect::<Vec<_>>()
             ))
             .collect::<BTreeMap<_, _>>());
+        let mut post_gd_losses = Vec::new();
+        if options.post_gd {
+            let mut selected = crate::differentiation::ParameterSelection {
+                phenotypes: self
+                    .model
+                    .phenotype_labels
+                    .iter()
+                    .filter(|n| {
+                        options.optimize_phenotypes && !options.excluded_phenotypes.contains(n)
+                    })
+                    .cloned()
+                    .collect(),
+                bone_rotations: self
+                    .partition
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, entries)| {
+                        *i == 0 || (!entries.is_empty() && !self.identity.contains(i))
+                    })
+                    .map(|(i, _)| self.model.data.metadata.bone_labels[i].clone())
+                    .collect(),
+                bone_translations: vec![self.model.data.metadata.bone_labels[0].clone()],
+                ..Default::default()
+            };
+            if options.post_gd_optimize_local_changes {
+                selected.local_changes = self.model.local_change_labels.clone();
+            }
+            if options.post_gd_optimize_facial_actions {
+                selected.facial_actions = self.model.facial_action_labels.clone();
+            }
+            let refined = crate::refinement::refine(
+                self.model,
+                &target,
+                &parameters,
+                &crate::refinement::RefinementOptions {
+                    steps: options.post_gd_steps,
+                    learning_rate: options.post_gd_lr,
+                    prior_weight: options.post_gd_prior_weight,
+                    selection: Some(selected),
+                    shared_phenotypes: options.shared_phenotypes,
+                    ..Default::default()
+                },
+                self.options.shape_prior.as_ref(),
+            )?;
+            parameters = refined.parameters;
+            output = refined.output;
+            vertices = self.vertices(&output)?;
+            mean_vertex_error = vertex_errors(&vertices, &target)?;
+            post_gd_losses = refined.losses;
+            let ph = model::parse_values(
+                &parameters.phenotype_kwargs,
+                &self.model.phenotype_labels,
+                0.5,
+                "refined phenotypes",
+            )?;
+            parameters.phenotype_kwargs = json!(self
+                .model
+                .phenotype_labels
+                .iter()
+                .enumerate()
+                .map(|(i, n)| (
+                    n.clone(),
+                    (0..b)
+                        .map(|bi| ph.data[bi * ph.shape[1] + i])
+                        .collect::<Vec<_>>()
+                ))
+                .collect::<BTreeMap<_, _>>());
+        }
         Ok(FitResult {
             parameters,
             vertices,
             output,
             mean_vertex_error,
             iterations: options.max_n_iters.unwrap_or(self.options.max_n_iters),
+            post_gd_losses,
         })
     }
 }

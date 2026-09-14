@@ -369,7 +369,8 @@ impl Objective<'_> {
             for (row, &id) in ids.iter().enumerate() {
                 for axis in 0..3 {
                     let index = id * 3 + axis;
-                    let residual = values.data[index] - target.data[(b * ids.len() + row) * 3 + axis];
+                    let residual =
+                        values.data[index] - target.data[(b * ids.len() + row) * 3 + axis];
                     let (l, d) = options.loss.value_derivative(residual);
                     loss += l / normalizer;
                     cot.data[index] = d / normalizer;

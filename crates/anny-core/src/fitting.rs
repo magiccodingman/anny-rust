@@ -244,6 +244,7 @@ pub fn fit_mesh(
         output: first,
         mean_vertex_error: vec![distances[0]],
         iterations: 0,
+        post_gd_losses: vec![],
     });
     Ok(MeshFitResult {
         fit,
