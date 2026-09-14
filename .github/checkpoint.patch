@@ -1,0 +1,381 @@
+diff --git a/crates/anny-core/src/fitting.rs b/crates/anny-core/src/fitting.rs
+index 4516aa2..c8c1993 100644
+--- a/crates/anny-core/src/fitting.rs
++++ b/crates/anny-core/src/fitting.rs
+@@ -244,6 +244,7 @@ pub fn fit_mesh(
+         output: first,
+         mean_vertex_error: vec![distances[0]],
+         iterations: 0,
++        post_gd_losses: vec![],
+     });
+     Ok(MeshFitResult {
+         fit,
+diff --git a/crates/anny-core/src/inverter.rs b/crates/anny-core/src/inverter.rs
+index a536392..4978b08 100644
+--- a/crates/anny-core/src/inverter.rs
++++ b/crates/anny-core/src/inverter.rs
+@@ -21,6 +21,8 @@ pub struct InverterOptions {
+     pub joint_top_k: Option<usize>,
+     pub identity_bone_labels: Vec<String>,
+     pub regularization: BTreeMap<String, f64>,
++    /// Explicit calibration for an optional post_gd shape prior.
++    pub shape_prior: Option<crate::distribution::SimpleShapeDistribution>,
+ }
+ impl Default for InverterOptions {
+     fn default() -> Self {
+@@ -32,6 +34,7 @@ impl Default for InverterOptions {
+             joint_top_k: Some(1024),
+             identity_bone_labels: vec![],
+             regularization: BTreeMap::new(),
++            shape_prior: None,
+         }
+     }
+ }
+@@ -46,6 +49,12 @@ pub struct FitOptions {
+     pub max_delta: f64,
+     pub shared_phenotypes: bool,
+     pub multistart: BTreeMap<String, Vec<f64>>,
++    pub post_gd: bool,
++    pub post_gd_steps: usize,
++    pub post_gd_lr: f64,
++    pub post_gd_prior_weight: f64,
++    pub post_gd_optimize_local_changes: bool,
++    pub post_gd_optimize_facial_actions: bool,
+ }
+ impl Default for FitOptions {
+     fn default() -> Self {
+@@ -58,6 +67,12 @@ impl Default for FitOptions {
+             max_delta: 0.1,
+             shared_phenotypes: false,
+             multistart: BTreeMap::new(),
++            post_gd: false,
++            post_gd_steps: 100,
++            post_gd_lr: 1e-3,
++            post_gd_prior_weight: 0.,
++            post_gd_optimize_local_changes: false,
++            post_gd_optimize_facial_actions: false,
+         }
+     }
+ }
+@@ -68,13 +83,16 @@ pub struct FitResult {
+     pub output: ModelOutput,
+     pub mean_vertex_error: Vec<f64>,
+     pub iterations: usize,
++    /// Empty when refinement was disabled; initial loss plus each Adam step otherwise.
++    pub post_gd_losses: Vec<f64>,
+ }
+ impl FitResult {
+     pub fn to_json(&self) -> Value {
+-        json!({"parameters":self.parameters,"mean_vertex_error":self.mean_vertex_error,"iterations":self.iterations})
++        json!({"parameters":self.parameters,"mean_vertex_error":self.mean_vertex_error,"iterations":self.iterations,"post_gd_losses":self.post_gd_losses})
+     }
+ }
+-/// CPU fitting does not require automatic differentiation. All matrices and
++/// The baseline uses finite differences/registration; optional post_gd uses native
++/// analytic parameter gradients. All matrices and
+ /// regularized solves are f64; iteration trajectories need not match torch f32.
+ pub struct AnnyInverter<'a> {
+     model: &'a Anny,
+@@ -462,6 +480,28 @@ impl<'a> AnnyInverter<'a> {
+             options.max_delta > 0. && options.max_delta.is_finite(),
+             "max_delta must be positive",
+         )?;
++        if options.post_gd {
++            ensure(
++                options.post_gd_steps <= 10_000
++                    && options.post_gd_lr.is_finite()
++                    && options.post_gd_lr > 0.,
++                "invalid post_gd steps/learning rate",
++            )?;
++            ensure(
++                options.post_gd_prior_weight.is_finite() && options.post_gd_prior_weight >= 0.,
++                "invalid post_gd prior weight",
++            )?;
++            if options.post_gd_prior_weight > 0. {
++                ensure(
++                    self.options.shape_prior.is_some(),
++                    "post_gd prior requires supplied shape calibration",
++                )?;
++                ensure(
++                    options.optimize_phenotypes,
++                    "post_gd prior requires phenotype optimization",
++                )?;
++            }
++        }
+         for key in &options.excluded_phenotypes {
+             ensure(
+                 self.model.phenotype_labels.contains(key),
+@@ -524,9 +564,9 @@ impl<'a> AnnyInverter<'a> {
+                 best = Some((state, e));
+             }
+         }
+-        let (state, mean_vertex_error) = best.unwrap();
+-        let output = self.evaluate(&state)?;
+-        let vertices = self.vertices(&output)?;
++        let (state, mut mean_vertex_error) = best.unwrap();
++        let mut output = self.evaluate(&state)?;
++        let mut vertices = self.vertices(&output)?;
+         let mut parameters = self.parameters(&state);
+         parameters.pose_parameters = self
+             .model
+@@ -546,12 +586,81 @@ impl<'a> AnnyInverter<'a> {
+                     .collect::<Vec<_>>()
+             ))
+             .collect::<BTreeMap<_, _>>());
++        let mut post_gd_losses = Vec::new();
++        if options.post_gd {
++            let mut selected = crate::differentiation::ParameterSelection {
++                phenotypes: self
++                    .model
++                    .phenotype_labels
++                    .iter()
++                    .filter(|n| {
++                        options.optimize_phenotypes && !options.excluded_phenotypes.contains(n)
++                    })
++                    .cloned()
++                    .collect(),
++                bone_rotations: self
++                    .partition
++                    .iter()
++                    .enumerate()
++                    .filter(|(i, entries)| {
++                        *i == 0 || (!entries.is_empty() && !self.identity.contains(i))
++                    })
++                    .map(|(i, _)| self.model.data.metadata.bone_labels[i].clone())
++                    .collect(),
++                bone_translations: vec![self.model.data.metadata.bone_labels[0].clone()],
++                ..Default::default()
++            };
++            if options.post_gd_optimize_local_changes {
++                selected.local_changes = self.model.local_change_labels.clone();
++            }
++            if options.post_gd_optimize_facial_actions {
++                selected.facial_actions = self.model.facial_action_labels.clone();
++            }
++            let refined = crate::refinement::refine(
++                self.model,
++                &target,
++                &parameters,
++                &crate::refinement::RefinementOptions {
++                    steps: options.post_gd_steps,
++                    learning_rate: options.post_gd_lr,
++                    prior_weight: options.post_gd_prior_weight,
++                    selection: Some(selected),
++                    shared_phenotypes: options.shared_phenotypes,
++                    ..Default::default()
++                },
++                self.options.shape_prior.as_ref(),
++            )?;
++            parameters = refined.parameters;
++            output = refined.output;
++            vertices = self.vertices(&output)?;
++            mean_vertex_error = vertex_errors(&vertices, &target)?;
++            post_gd_losses = refined.losses;
++            let ph = model::parse_values(
++                &parameters.phenotype_kwargs,
++                &self.model.phenotype_labels,
++                0.5,
++                "refined phenotypes",
++            )?;
++            parameters.phenotype_kwargs = json!(self
++                .model
++                .phenotype_labels
++                .iter()
++                .enumerate()
++                .map(|(i, n)| (
++                    n.clone(),
++                    (0..b)
++                        .map(|bi| ph.data[bi * ph.shape[1] + i])
++                        .collect::<Vec<_>>()
++                ))
++                .collect::<BTreeMap<_, _>>());
++        }
+         Ok(FitResult {
+             parameters,
+             vertices,
+             output,
+             mean_vertex_error,
+             iterations: options.max_n_iters.unwrap_or(self.options.max_n_iters),
++            post_gd_losses,
+         })
+     }
+ }
+diff --git a/crates/anny-core/src/operations.rs b/crates/anny-core/src/operations.rs
+index a7a3de1..f79aa11 100644
+--- a/crates/anny-core/src/operations.rs
++++ b/crates/anny-core/src/operations.rs
+@@ -14,6 +14,30 @@ use serde_json::{json, Value};
+ #[derive(Clone, Debug, Serialize, Deserialize)]
+ #[serde(tag = "operation", rename_all = "kebab-case", deny_unknown_fields)]
+ pub enum Request {
++    Jvp {
++        #[serde(default)]
++        parameters: Parameters,
++        direction: crate::differentiation::ParameterDirection,
++    },
++    Vjp {
++        #[serde(default)]
++        parameters: Parameters,
++        selection: crate::differentiation::ParameterSelection,
++        cotangents: std::collections::BTreeMap<String, Tensor>,
++    },
++    Refine {
++        target: Tensor,
++        #[serde(default)]
++        parameters: Parameters,
++        #[serde(default)]
++        options: Box<crate::refinement::RefinementOptions>,
++        #[serde(default)]
++        distribution: Option<SimpleShapeDistribution>,
++    },
++    PriorGradient {
++        distribution: SimpleShapeDistribution,
++        phenotypes: std::collections::BTreeMap<String, f64>,
++    },
+     MotionResample {
+         clip: crate::motion::PoseClip,
+         fps: f64,
+@@ -73,6 +97,41 @@ fn yes() -> bool {
+ }
+ pub fn execute(model: &Anny, request: &Request) -> Result<Value> {
+     match request {
++        Request::Jvp {
++            parameters,
++            direction,
++        } => Ok(crate::differentiation::jvp(model, parameters, direction)?.to_json()),
++        Request::Vjp {
++            parameters,
++            selection,
++            cotangents,
++        } => Ok(serde_json::to_value(crate::differentiation::vjp(
++            model, parameters, selection, cotangents,
++        )?)?),
++        Request::Refine {
++            target,
++            parameters,
++            options,
++            distribution,
++        } => Ok(crate::refinement::refine(
++            model,
++            target,
++            parameters,
++            options,
++            distribution.as_ref(),
++        )?
++        .to_json()),
++        Request::PriorGradient {
++            distribution,
++            phenotypes,
++        } => {
++            crate::ensure(
++                distribution.phenotype_labels == model.phenotype_labels,
++                "distribution phenotype labels do not match model",
++            )?;
++            let (loss, gradient) = crate::prior::shape_prior_gradient(distribution, phenotypes)?;
++            Ok(json!({"loss":loss,"gradient":gradient}))
++        }
+         Request::MotionResample { clip, fps } => {
+             Ok(serde_json::to_value(clip.resample(model, *fps)?)?)
+         }
+diff --git a/crates/anny-core/tests/post_gd.rs b/crates/anny-core/tests/post_gd.rs
+new file mode 100644
+index 0000000..486ca5f
+--- /dev/null
++++ b/crates/anny-core/tests/post_gd.rs
+@@ -0,0 +1,83 @@
++mod common;
++use anny_core::{
++    inverter::{AnnyInverter, FitOptions, InverterOptions},
++    operations, Parameters,
++};
++use serde_json::json;
++
++#[test]
++fn inverter_post_gd_is_opt_in_and_reports_actual_adam_steps() {
++    let m = common::tiny();
++    let target = m
++        .forward(&Parameters {
++            local_changes_kwargs: json!({"test-pos":0.5}),
++            facial_actions: json!({"jawOpen":0.4}),
++            ..Default::default()
++        })
++        .unwrap();
++    let fit = AnnyInverter::new(&m, InverterOptions::default()).unwrap();
++    let opts = FitOptions {
++        optimize_phenotypes: false,
++        max_n_iters: Some(0),
++        post_gd_steps: 200,
++        post_gd_lr: 0.01,
++        post_gd_optimize_local_changes: true,
++        post_gd_optimize_facial_actions: true,
++        ..Default::default()
++    };
++    let baseline = fit.fit(target.get("vertices").unwrap(), &opts).unwrap();
++    assert!(baseline.post_gd_losses.is_empty());
++    let enabled = FitOptions {
++        post_gd: true,
++        ..opts
++    };
++    let result = fit.fit(target.get("vertices").unwrap(), &enabled).unwrap();
++    assert_eq!(result.post_gd_losses.len(), 201);
++    assert!(
++        result.mean_vertex_error[0] < baseline.mean_vertex_error[0] * 0.02,
++        "{} -> {}",
++        baseline.mean_vertex_error[0],
++        result.mean_vertex_error[0]
++    );
++    assert!(result.post_gd_losses.last().unwrap() < &(result.post_gd_losses[0] * 0.001));
++    let rerun = m.forward(&result.parameters).unwrap();
++    assert!(rerun
++        .get("vertices")
++        .unwrap()
++        .data
++        .iter()
++        .zip(&result.output.get("vertices").unwrap().data)
++        .all(|(a, b)| (a - b).abs() < 1e-12));
++    assert!(result.parameters.phenotype_kwargs.is_object());
++    let wrong = FitOptions {
++        post_gd_prior_weight: 0.1,
++        ..enabled
++    };
++    assert!(fit.fit(target.get("vertices").unwrap(), &wrong).is_err());
++}
++
++#[test]
++fn shared_query_surface_exposes_real_gradients_and_refinement() {
++    let m = common::tiny();
++    let target = m
++        .forward(&Parameters {
++            local_changes_kwargs: json!({"test-pos":0.6}),
++            ..Default::default()
++        })
++        .unwrap();
++    let request = json!({"operation":"refine","target":target.get("vertices").unwrap(),"options":{"steps":100,"learning_rate":0.03,"selection":{"local_changes":["test-pos"]}}});
++    let output: serde_json::Value =
++        serde_json::from_str(&operations::execute_json(&m, &request.to_string()).unwrap()).unwrap();
++    assert_eq!(output["iterations"], 100);
++    let losses = output["losses"].as_array().unwrap();
++    assert!(losses.last().unwrap().as_f64().unwrap() < losses[0].as_f64().unwrap() * 0.001);
++    let jvp = json!({"operation":"jvp","direction":{"local_changes":{"test-pos":1.0}}});
++    assert!(operations::execute_json(&m, &jvp.to_string()).is_ok());
++    let vjp = json!({"operation":"vjp","selection":{"local_changes":["test-pos"]},"cotangents":{"vertices":target.get("vertices").unwrap()}});
++    let result: serde_json::Value =
++        serde_json::from_str(&operations::execute_json(&m, &vjp.to_string()).unwrap()).unwrap();
++    assert!(result["local_changes"]["test-pos"]
++        .as_f64()
++        .unwrap()
++        .is_finite());
++}
+diff --git a/crates/anny-core/src/refinement.rs b/crates/anny-core/src/refinement.rs
+--- a/crates/anny-core/src/refinement.rs
++++ b/crates/anny-core/src/refinement.rs
+@@ -369,7 +369,8 @@ impl Objective<'_> {
+             for (row, &id) in ids.iter().enumerate() {
+                 for axis in 0..3 {
+                     let index = id * 3 + axis;
+-                    let residual = values.data[index] - target.data[(b * ids.len() + row) * 3 + axis];
++                    let residual =
++                        values.data[index] - target.data[(b * ids.len() + row) * 3 + axis];
+                     let (l, d) = options.loss.value_derivative(residual);
+                     loss += l / normalizer;
+                     cot.data[index] = d / normalizer;
