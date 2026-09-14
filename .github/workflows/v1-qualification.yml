@@ -1,0 +1,116 @@
+name: Native v1 qualification
+on:
+  push:
+    branches: [codex/native-v1-completion]
+    paths: [.github/workflows/v1-qualification.yml]
+permissions:
+  contents: read
+jobs:
+  qualify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: naver/anny
+          ref: 81ca83e202273b306205c1cc15f33734be31e48c
+          path: .upstream
+      - uses: dtolnay/rust-toolchain@1.90.0
+        with:
+          targets: wasm32-unknown-unknown
+          components: rustfmt, clippy
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: examples/qualification/package-lock.json
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Fast native qualification
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --all -- --check
+          cargo test --workspace --locked
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+          cargo build --workspace --release --locked
+          cargo check -p anny-wasm --target wasm32-unknown-unknown --locked
+          ./target/release/anny verify-assets --assets data
+      - name: All real-asset native tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test -p anny-core --release --locked --test native_import -- --ignored --nocapture
+          cargo test -p anny-core --release --locked --test authoring -- --ignored --nocapture --test-threads=1
+          cargo test -p anny-core --release --locked --test typed_runtime -- --ignored --nocapture --test-threads=1
+          cargo test -p anny-core --release --locked --test differentiation -- --ignored --nocapture --test-threads=1
+          cargo test -p anny-core --release --locked --test refinement -- --ignored --nocapture --test-threads=1
+      - name: Real C and C# APIs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p output
+          ./target/release/anny prepare --assets data --output output/ci-model.safetensors
+          cc -std=c11 -Wall -Wextra -Werror -Iinclude examples/c_smoke.c -Ltarget/release -lanny_capi -Wl,-rpath,"$PWD/target/release" -o output/c-smoke
+          ./output/c-smoke data
+          cc -std=c11 -Wall -Wextra -Werror -Iinclude examples/c_float_smoke.c -Ltarget/release -lanny_capi -lm -Wl,-rpath,"$PWD/target/release" -o output/c-f32-smoke
+          ./output/c-f32-smoke data
+          dotnet build examples/csharp --configuration Release
+          export LD_LIBRARY_PATH="$PWD/target/release:${LD_LIBRARY_PATH:-}"
+          dotnet run --project examples/csharp --configuration Release --no-build -- "$PWD/output/ci-model.safetensors"
+      - name: Install Python reference-only dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install torch==2.10.0 --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install roma==1.6.1 safetensors==0.7.0 warp-lang==1.9.1 pyyaml pillow numpy trimesh requests
+          python -m pip install --no-deps ./.upstream
+      - name: Fresh 23-case Python forward reference qualification
+        shell: bash
+        env:
+          ANNY_CACHE_DIR: ${{ github.workspace }}/output/reference-cache
+          PYTHONPATH: ${{ github.workspace }}/.upstream/src
+          OMP_NUM_THREADS: '2'
+        run: |
+          set -euo pipefail
+          python tools/import_assets.py --source .upstream --destination output/reference-data
+          python tools/export_reference.py --output output/fixtures --cases all-cases
+          python tools/check_parity.py --assets output/reference-data --fixtures output/fixtures --summary output/parity-summary.json
+      - name: Build browser WASM package
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build -p anny-wasm --release --target wasm32-unknown-unknown --locked
+          cargo install wasm-bindgen-cli --version 0.2.100 --locked
+          rm -rf examples/browser/pkg
+          wasm-bindgen --target web --out-dir examples/browser/pkg target/wasm32-unknown-unknown/release/anny_wasm.wasm
+      - name: Install browser/validator qualification dependencies
+        working-directory: examples/qualification
+        run: npm ci
+      - name: Install Playwright Chromium
+        working-directory: examples/qualification
+        run: npx playwright install --with-deps chromium
+      - name: Actual browser lifecycle and independent glTF validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          node examples/qualification/browser.cjs output/ci-model.safetensors
+          ./target/release/anny generate --assets data --config examples/all.json --params examples/character.json --precision f32 --mesh output/character-f32.glb --rigged true
+          ./target/release/anny motion --assets data --source examples/motion.json --fps 6 --precision f32 --output output/motion-f32.glb
+          node examples/qualification/validate.cjs output/browser-authored.glb output/character-f32.glb output/motion-f32.glb
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-v1-qualification
+          path: |
+            output/parity-summary.json
+            output/fixtures/*/comparison.json
+            output/fixtures/*/native.log
+            output/browser-result.json
+            output/*.validation.json
+          retention-days: 7
