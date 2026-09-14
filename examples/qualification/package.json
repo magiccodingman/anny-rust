@@ -1,0 +1,10 @@
+{
+  "name": "anny-native-qualification",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Optional developer-only browser and glTF checks; not a runtime dependency",
+  "dependencies": {
+    "gltf-validator": "2.0.0-dev.3.10",
+    "playwright": "1.51.1"
+  }
+}
