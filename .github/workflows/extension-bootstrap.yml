@@ -1,7 +1,8 @@
-# Temporary development input packaging; removed in the extension commit.
+# Temporary development snapshot; removed after extension validation.
 name: Extension bootstrap
 on:
   push:
+    branches: [codex/anny-rust-native-port]
     paths: [.github/workflows/extension-bootstrap.yml]
 permissions:
   contents: read
@@ -13,32 +14,20 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@1.90.0
-      - name: Package exact source and offline dependencies
+      - name: Package exact tracked source and locked dependencies
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p bundle/deps/src
-          git archive --format=tar HEAD > bundle/source.tar
-          git rev-parse HEAD > bundle/source-commit.txt
-          printf 'fn main() {}\n' > bundle/deps/src/main.rs
-          cat > bundle/deps/Cargo.toml <<'EOF'
-          [workspace]
-          [package]
-          name = "anny-extension-dependencies"
-          version = "0.1.0"
-          edition = "2021"
-          [dependencies]
-          zip = { version = "=0.6.6", default-features = false, features = ["deflate"] }
-          serde_yaml = "=0.9.34"
-          base64 = "=0.22.1"
-          EOF
-          cd bundle/deps
-          cargo vendor --versioned-dirs ../vendor > config.toml
-          cd ../..
-          tar -czf extension-inputs.tar.gz -C bundle .
+          mkdir -p "$RUNNER_TEMP/bundle"
+          git archive --format=tar HEAD > "$RUNNER_TEMP/bundle/source.tar"
+          git rev-parse HEAD > "$RUNNER_TEMP/bundle/source-commit.txt"
+          cargo vendor --locked --versioned-dirs "$RUNNER_TEMP/bundle/vendor" > "$RUNNER_TEMP/bundle/config.toml"
+          cd "$RUNNER_TEMP/bundle"
+          npm pack gltf-validator@2.0.0-dev.3.10
+          tar -czf "$RUNNER_TEMP/extension-inputs.tar.gz" .
       - uses: actions/upload-artifact@v4
         with:
           name: extension-inputs
-          path: extension-inputs.tar.gz
+          path: ${{ runner.temp }}/extension-inputs.tar.gz
           retention-days: 1
           compression-level: 0
