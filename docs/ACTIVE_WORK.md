@@ -1,59 +1,54 @@
-# PR #2 working checkpoint
+# Native v1 handoff
 
-Branch: `codex/native-v1-completion`; base `main@2ff24c4d8e864bba0e460f6074d23437e19aed71`.
-Do not merge, force-push, modify canonical `data/`, or overwrite owner `tools/`.
-Publish small source checkpoints and verify remote SHAs. Local work is transient.
-Retry intermittent publishing failures; if persistent, stop and involve the owner.
+This file was the browser-agent recovery ledger during PR #2. The implementation is now published in ordinary source files; it is no longer a source-recovery/WIP warning.
 
-## Current source, not the stale payload-only state
+## Native-v1 state
 
-Recovered snapshot `bcb79bedc2bef7b1856154970b6ab39c5b160107` exactly matches Git
-tree `0dccf33abe479702824a2314fe8a6c64319232a8`. The following are already in ordinary
-source paths; do not reimplement them based on an older status message:
+Implemented and qualified at the level described in `V1_VALIDATION.md`:
 
-- Shared-equation true f32/f64 evaluation, typed C/C#/WASM and CLI precision.
-- Native NPY/NPZ, pose clips/resampling, supplied-pose GLB animation and optional
-  supplied-model AMASS baseline with explicit correspondence.
-- Landmark fitting initialization; analytic parameter JVP/VJP and shape priors.
-- Native Adam in `refinement.rs`, optional inverter `post_gd`, and the common
-  `jvp`/`vjp`/`refine` query operations used by C/C#/WASM. Post-GD is off by default.
-- `gltf_asset/`: retained document authoring, morph deltas, PNG/JPEG textures,
-  PBR materials, animation clips/import/sampling, and shared authoring byte APIs.
+- shared-equation f64 and true f32 evaluation,
+- typed Rust/C/C#/WASM access,
+- Python-free upstream asset import/runtime,
+- body/rig/topology/morph/pose generation,
+- native authoring/precomputation/caching,
+- mesh and rigged glTF/GLB scene I/O,
+- retained glTF morph/material/texture/animation authoring,
+- NPY/NPZ and native pose clips,
+- supplied-model AMASS/SMPL-X baseline,
+- known-correspondence/closest-surface/landmark-initialized fitting,
+- specialized analytic JVP/VJP/prior derivatives,
+- native Adam and optional inverter `post_gd`,
+- real C/.NET/WASM browser lifecycle qualification,
+- fresh 23/23 NAVER forward-reference parity after the shared-kernel/topology changes.
 
-## Fresh local baseline on that exact source
+See:
 
-Rust 1.90.0, locked vendored dependencies:
-- Workspace tests: **76 passed**, **6 opt-in tests ignored**.
-- `cargo fmt --all -- --check`: passed.
-- Workspace/all-target Clippy with warnings denied: passed.
-- This is not yet a new Python-reference, real-asset, browser or CI qualification.
-  The older 51-test checkpoint and notes saying post_gd is unwired are superseded.
+- `PORTING_STATUS.md` — delivered vs deferred capability ledger.
+- `COMPATIBILITY.md` — semantic/intentional differences from Python/PyTorch.
+- `V1_VALIDATION.md` — numerical/runtime evidence and exact boundaries.
+- `AUTHORING.md` — authoring/fitting/refinement operations.
+- `SCENES_AND_MESH_IO.md` — geometry vs retained glTF behavior.
 
-## Active continuation
+## Important boundaries
 
-Qualify the published implementation and close concrete remaining gaps. Start
-with a fresh 23-case Python forward-reference run after the shared-kernel changes,
-then targeted fitting/derivative, f32 and real language/browser checks. Check source
-and test failures before widening claims. Inspect glTF authoring and motion APIs
-for malformed-input and behavioral gaps; add small focused fixes/tests.
+- No Python/PyTorch/LibTorch/Warp production or build dependency.
+- External licensed SMPL/SMPL-X/AMASS model data absent from NAVER upstream is caller-supplied and not bundled/downloaded.
+- Analytic differentiation is specialized for Anny fitting/refinement, not a generic framework autograd tape.
+- Closest-surface/landmark fitting is not a claim of automatic globally robust registration for every arbitrary scan.
+- Geometry-only glTF import intentionally flattens document authoring; use retained `GltfAsset` operations when materials/morphs/animation must round-trip.
 
-## Remaining native-completeness checklist
+## Next project phase — intentionally unfinished
 
-1. Fresh original forward references plus f32, derivative and real refinement tests.
-2. Fitting/AMASS workflow and helper/binding audit, explicitly separate synthetic
-   supplied-model tests from unavailable licensed real-model qualification.
-3. Independent glTF validation and authoring/animation round trips.
-4. Actual C/C# runtime and browser WASM smoke (not a character editor).
-5. Update capability/validation docs and PR ledger; remove obsolete delivery and
-   snapshot scaffolding after the source and recovery checkpoints are durable.
+The following remain the major successor workstream:
 
-## Later phase, deliberately deferred
+1. GPU/WebGPU backend.
+2. SIMD tuning.
+3. Unity Runtime/Editor package.
+4. Complete browser character editor.
+5. Serious profiling-driven performance optimization.
 
-- GPU/WebGPU backend.
-- SIMD tuning.
-- Unity package.
-- Complete browser character editor.
-- Broad performance optimization.
+Optional future work also includes CUDA/ROCm-specialized backends and qualification with user-supplied licensed SMPL/SMPL-X/AMASS data.
 
-No external licensed assets are acquired. Python reference tooling is optional
-and developer-only; Cargo and the production library do not invoke Python.
+## Agent/recovery discipline
+
+If further agentic work is performed in a transient browser environment, keep using small ordinary source commits and PR comments as durable handoff. Do not accumulate large local-only deltas. If GitHub writes temporarily fail, retry shortly; if they remain unavailable, stop and involve the owner.
