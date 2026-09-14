@@ -58,6 +58,13 @@ int32_t anny_output_f32_tensor(const AnnyOutputF32 *output,const char *name,Anny
 int32_t anny_model_f32_prepared_bytes(const AnnyModelF32 *model,AnnyBytes **out);
 void anny_model_f32_free(AnnyModelF32 *model);
 void anny_output_f32_free(AnnyOutputF32 *output);
+/* Standalone base-glTF authoring, no model handle required. Inputs are borrowed
+ * for the call. On error outputs are null; error text uses anny_last_error(). */
+int32_t anny_gltf_edit(const uint8_t *bytes, size_t len,
+    const char *operations_json, AnnyBytes **out);
+int32_t anny_gltf_query(const uint8_t *bytes, size_t len,
+    const char *request_json, char **out);
+
 #ifdef __cplusplus
 }
 #endif

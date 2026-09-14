@@ -155,3 +155,33 @@ impl AnnyModel {
         })
     }
 }
+
+/// In-memory glTF authoring. Owned JS outputs survive memory growth and disposal.
+#[wasm_bindgen]
+pub struct GltfDocument {
+    asset: anny_core::gltf_asset::GltfAsset,
+}
+#[wasm_bindgen]
+impl GltfDocument {
+    #[wasm_bindgen(constructor)]
+    pub fn new(bytes: &[u8]) -> Result<GltfDocument, JsValue> {
+        Ok(Self {
+            asset: anny_core::gltf_asset::GltfAsset::from_bytes(bytes).map_err(js_error)?,
+        })
+    }
+    pub fn query(&self, request_json: &str) -> Result<String, JsValue> {
+        let query = serde_json::from_str(request_json).map_err(js_error)?;
+        serde_json::to_string(&self.asset.query(&query).map_err(js_error)?).map_err(js_error)
+    }
+    pub fn edit(&mut self, operations_json: &str) -> Result<String, JsValue> {
+        let operations: Vec<anny_core::gltf_asset::GltfEdit> =
+            serde_json::from_str(operations_json).map_err(js_error)?;
+        serde_json::to_string(&self.asset.apply_edits(&operations).map_err(js_error)?)
+            .map_err(js_error)
+    }
+    pub fn glb(&self) -> Result<js_sys::Uint8Array, JsValue> {
+        Ok(js_sys::Uint8Array::from(
+            self.asset.to_glb().map_err(js_error)?.as_slice(),
+        ))
+    }
+}

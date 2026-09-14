@@ -140,3 +140,20 @@ fn authoring_bounds_and_duplicate_names_are_errors() {
         )
         .is_err());
 }
+
+#[test]
+fn serialized_authoring_and_query_use_the_same_native_implementation() {
+    let a = asset();
+    let request = r#"[{"op":"set-material","mesh":0,"primitive":0,"material":{"name":"portable","base_color":[0.1,0.2,0.3,1.0]}}]"#;
+    let bytes = edit_glb(&a.to_glb().unwrap(), request).unwrap();
+    let info: serde_json::Value =
+        serde_json::from_str(&query_glb(&bytes, r#"{"operation":"describe"}"#).unwrap()).unwrap();
+    assert_eq!(info["meshes"], 1);
+    let document: serde_json::Value =
+        serde_json::from_str(&query_glb(&bytes, r#"{"operation":"document"}"#).unwrap()).unwrap();
+    let index = document["meshes"][0]["primitives"][0]["material"]
+        .as_u64()
+        .unwrap() as usize;
+    assert_eq!(document["materials"][index]["name"], "portable");
+    assert!(edit_glb(&bytes, r#"[{"op":"unknown"}]"#).is_err());
+}

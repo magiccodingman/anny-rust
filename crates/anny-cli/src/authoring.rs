@@ -23,11 +23,34 @@ fn number(opts: &BTreeMap<String, String>, name: &str, default: usize) -> Result
     Ok(n)
 }
 pub fn help() {
+    println!("gltf-edit --source input.glb|gltf --operations edits.json --output result.glb\ngltf-query --source input.glb|gltf --request query.json [--output response.json]");
     println!("export-calibration/export-keypoints --assets data [--config config.json] --output portable.json");
     println!("\nNative authoring:\ntransform (--assets data | --model prepared.safetensors) --operations operations.json --output prepared.safetensors\nprecompute-rig --assets data --rig anny|soma [--options options.json] --output covariance.safetensors\ncache-orientations (--assets data | --model prepared.safetensors) [--params reference.json] [--options options.json] --output prepared.safetensors\nrecompute-weights --assets data --output cleaned-weights.json\nfit --target mesh.obj|ply|stl|glb|gltf --correspondence index|closest-surface [--mesh-fit-options options.json] --output parameters.json\nquery (--assets data | --model prepared.safetensors) --request operation.json [--output response.json]\nbenchmark (--assets data | --model prepared.safetensors) [--params params.json] [--iterations 10] [--warmup 1] [--report timings.json]\n\n--cache-dir DIRECTORY or auto opts into a checksummed native disk cache for raw asset construction. Disabled by default; no Python cache protocol dependency.");
 }
 pub fn run(command: &str, opts: &BTreeMap<String, String>) -> Result<bool> {
     match command {
+        "gltf-edit" | "gltf-query" => {
+            let mut asset = anny_core::gltf_asset::GltfAsset::load(required(opts, "source")?)?;
+            if command == "gltf-edit" {
+                let edits = read_json::<Vec<anny_core::gltf_asset::GltfEdit>>(required(
+                    opts,
+                    "operations",
+                )?)?;
+                let ids = asset.apply_edits(&edits)?;
+                let output = Path::new(required(opts, "output")?);
+                parent(output)?;
+                asset.save_glb(output)?;
+                println!("{}", json!({"indices":ids,"output":output}));
+            } else {
+                let query = read_json(required(opts, "request")?)?;
+                let result = asset.query(&query)?;
+                if let Some(path) = opts.get("output") {
+                    write_json(path, &result)?;
+                }
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            }
+        }
+
         "transform" => {
             let source = model(opts)?;
             let operations: Vec<Transform> = read_json(required(opts, "operations")?)?;

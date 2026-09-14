@@ -628,3 +628,115 @@ mod tests {
 }
 
 pub mod single;
+
+/// Edit self-contained glTF/GLB bytes using gltf_asset::GltfEdit JSON. No model
+/// handle is needed. Free the independent result with anny_bytes_free.
+/// # Safety
+/// bytes covers len readable bytes; operations_json is NUL-terminated UTF-8;
+/// out points to writable, nonaliased handle storage.
+#[no_mangle]
+pub unsafe extern "C" fn anny_gltf_edit(
+    bytes: *const u8,
+    len: usize,
+    operations_json: *const c_char,
+    out: *mut *mut AnnyBytes,
+) -> i32 {
+    guard(|| {
+        if out.is_null() {
+            return Err("null bytes output".into());
+        }
+        unsafe {
+            *out = ptr::null_mut();
+        }
+        if bytes.is_null() || len == 0 || len > 512 * 1024 * 1024 {
+            return Err("invalid glTF byte buffer".into());
+        }
+        let input = unsafe { std::slice::from_raw_parts(bytes, len) };
+        let result = anny_core::gltf_asset::edit_glb(input, unsafe { text(operations_json)? })
+            .map_err(|e| e.to_string())?;
+        unsafe {
+            *out = Box::into_raw(Box::new(AnnyBytes { bytes: result }));
+        }
+        Ok(())
+    })
+}
+/// Query self-contained glTF/GLB bytes; free returned UTF-8 with anny_string_free.
+/// # Safety
+/// bytes covers len readable bytes, request_json is NUL-terminated UTF-8 and
+/// out points to writable, nonaliased pointer storage.
+#[no_mangle]
+pub unsafe extern "C" fn anny_gltf_query(
+    bytes: *const u8,
+    len: usize,
+    request_json: *const c_char,
+    out: *mut *mut c_char,
+) -> i32 {
+    guard(|| {
+        if out.is_null() {
+            return Err("null text output".into());
+        }
+        unsafe {
+            *out = ptr::null_mut();
+        }
+        if bytes.is_null() || len == 0 || len > 512 * 1024 * 1024 {
+            return Err("invalid glTF byte buffer".into());
+        }
+        let input = unsafe { std::slice::from_raw_parts(bytes, len) };
+        let result = anny_core::gltf_asset::query_glb(input, unsafe { text(request_json)? })
+            .map_err(|e| e.to_string())?;
+        let result = CString::new(result).map_err(|e| e.to_string())?;
+        unsafe {
+            *out = result.into_raw();
+        }
+        Ok(())
+    })
+}
+
+#[cfg(test)]
+mod gltf_tests {
+    use super::*;
+    #[test]
+    fn standalone_gltf_bytes_and_text_are_owned_and_failures_clear_outputs() {
+        let mut scene = anny_core::scene::Scene::new();
+        scene
+            .add_character(&fixture::tiny(), &Default::default(), &Default::default())
+            .unwrap();
+        let input = scene.to_glb().unwrap();
+        let operations = CString::new("[]").unwrap();
+        let request = CString::new(r#"{"operation":"describe"}"#).unwrap();
+        let mut bytes = ptr::null_mut();
+        assert_eq!(
+            unsafe { anny_gltf_edit(input.as_ptr(), input.len(), operations.as_ptr(), &mut bytes) },
+            0
+        );
+        drop(input);
+        let mut text = ptr::null_mut();
+        assert_eq!(
+            unsafe {
+                anny_gltf_query(
+                    anny_bytes_data(bytes),
+                    anny_bytes_len(bytes),
+                    request.as_ptr(),
+                    &mut text,
+                )
+            },
+            0
+        );
+        unsafe {
+            anny_bytes_free(bytes);
+        }
+        assert!(unsafe { CStr::from_ptr(text) }
+            .to_str()
+            .unwrap()
+            .contains("meshes"));
+        unsafe {
+            anny_string_free(text);
+        }
+        bytes = ptr::dangling_mut();
+        assert_ne!(
+            unsafe { anny_gltf_edit(ptr::null(), 0, operations.as_ptr(), &mut bytes) },
+            0
+        );
+        assert!(bytes.is_null());
+    }
+}

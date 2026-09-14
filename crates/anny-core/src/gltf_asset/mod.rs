@@ -4,10 +4,12 @@
 //! Image payloads remain opaque PNG/JPEG bytes; no renderer is embedded.
 mod animation;
 mod authoring;
+mod operations;
 pub use animation::{AnimationChannel, AnimationClip, AnimationPath, Interpolation};
 pub use authoring::{
     AlphaMode, MorphDeltas, PbrMaterial, TextureFilter, TextureOptions, TextureReference, WrapMode,
 };
+pub use operations::{edit_glb, query_glb, GltfEdit, GltfQuery};
 
 use crate::{
     ensure,

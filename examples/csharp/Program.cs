@@ -34,4 +34,10 @@ if (singleMesh.Vertices.Length != mesh.Vertices.Length || singleMesh.Vertices.An
 var error = mesh.Vertices.Zip(singleMesh.Vertices, (a,b) => Math.Abs(a-b)).Max();
 if (error > 2e-4) throw new InvalidDataException($"f32 mismatch: {error}");
 Console.WriteLine($"Native f32 C# evaluation: PASS; maximum vertex error {error:E}");
+var edited = AnnyGltf.Edit(glb, "[{\"op\":\"set-material\",\"mesh\":0,\"primitive\":0,\"material\":{\"name\":\"managed-edit\",\"roughness\":0.4}}]");
+using var gltfInfo = JsonDocument.Parse(AnnyGltf.Query(edited));
+if (gltfInfo.RootElement.GetProperty("meshes").GetInt32() != 1) throw new InvalidDataException("glTF edit lost mesh.");
+using var derivative = JsonDocument.Parse(model.Query("{\"operation\":\"jvp\",\"direction\":{\"phenotypes\":{\"height\":1.0}}}"));
+_ = derivative.RootElement.GetProperty("vertices");
+Console.WriteLine("Native glTF document edit/query and analytic JVP through C#: PASS");
 return 0;
