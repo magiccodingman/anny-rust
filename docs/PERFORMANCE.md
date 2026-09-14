@@ -128,9 +128,10 @@ is a 1.5-2x optimization, not a 32x one. Both `Anny::pose_session` and `AnnyF32:
 and are exact-equivalence tested (`max difference 0e0` against `forward` on real data over 8 poses,
 all five pose conventions, plus bit-identical f32).
 
-**4. Collision is now the single biggest outlier by an order of magnitude.** `derive collision` costs
-60.6 ms — ~100x a full generation of the same character. The split is now measured: module
-construction 15.1 ms, search 47.6 ms. Neither is a validation scan.
+**4. Collision was the single biggest outlier by an order of magnitude, and is now 2.2x cheaper.**
+`derive collision` cost 60.6 ms — ~100x a full generation of the same character. The split was
+measured: module construction 15.1 ms, search 47.6 ms. Neither was a validation scan. It now costs
+**29.8 ms**, with the output bit-identical to before (the digest below).
 
 - Construction built a per-vertex `BTreeSet<String>` of bone labels and a per-face merged label set
   (13,718 sets, ~82k `String` clones over 27,420 faces). **Fixed**: labels are interned once into a
@@ -139,8 +140,19 @@ construction 15.1 ms, search 47.6 ms. Neither is a validation scan.
 - Search rebuilds `MeshBvh::new(&v, &self.faces)` — a BVH over all 27,420 triangles — **inside the
   per-batch loop**, then issues one AABB query per face, `sort_unstable()`s the candidate list, and
   previously tested `masks[i].is_disjoint(&masks[j])` with `BTreeSet<String>` comparisons before the
-  SAT test. The string comparison was part of the cost: search 47.912 → **33.215 ms**. Rebuilding the
-  acceleration structure per call is still the main remaining cost here and is not addressed.
+  SAT test. The string comparison was part of the cost: search 47.912 → **33.215 ms**.
+- The search then made each query allocate a traversal stack and a result vector — ~55k allocations
+  per call. `MeshBvh::overlapping_faces_into` writes into caller-owned buffers, which the search now
+  reuses across all 27,420 queries: search 33.215 → **~21 ms**, whole path 60.5 → **29.8 ms**.
+- **A faster broad phase was written, measured, and rejected.** Replacing the per-face BVH query with
+  an exact sweep-and-prune over face AABBs is 12.6 ms of search instead of 22.1 ms and needs no
+  accelerator structure at all. It also changes the answer: 728 partners instead of 940. The cause is
+  that the BVH returns faces from *leaf* nodes whose AABB overlaps the query, so its candidate set is a
+  superset of true AABB overlaps, and `triangle_intersects_sat` skips edge-cross axes with
+  `norm_squared() <= 1e-6` — so near-degenerate pairs are reported as intersecting while their AABBs
+  are provably disjoint, and those pairs are reachable only through the leaf-union superset. Upstream's
+  BVH query behaves the same way, so narrowing the candidate set trades parity for speed. It was
+  reverted; the digest test below is what made the difference visible.
 - **The inversion this nearly shipped**: the first version of the interned test was named
   `label_masks_disjoint` and used un-negated where the old code used `!is_disjoint`, which silently
   changed the result from 940 to 27,420 reported partners. It was caught by recording an output digest
@@ -160,9 +172,10 @@ re-reads a converted asset from the store on every call.
 
 ## Ranking of remaining work, by measured upside
 
-1. **`derive collision`'s BVH rebuild (33.2 ms search)** — the module now builds masks cheaply and the
-   pair test is integer-based, but `MeshBvh::new` over all 27,420 triangles still runs once per call.
-   That is the whole remaining cost of this path and the next measured target.
+1. **Collision is no longer the top outlier.** It went 64.6 → 29.8 ms this session and is exact-output
+   verified. What remains is the per-call `MeshBvh::new` (12.9 ms of the 29.8) plus the ~1.07M-candidate
+   narrow phase; the exact-AABB alternative is faster but changes the answer (see above), so the next
+   step here would need to be a deliberate parity decision rather than a pure optimization.
 2. **Per-character accumulation (~286 us/character)** — now the whole cost of generation. SIMD
    (explicitly vectorized f64/f32 kernels) and coefficient-blocked access. This is also what
    `batch generate x100` work in a population-scale job depends on.

@@ -362,13 +362,24 @@ impl SelfInterpenetrationModule {
             data: vec![-1.; vertices.shape[0] * f],
             kind: Kind::Index,
         };
+        // Broad phase: one BVH query per face, with the traversal buffers reused across all 27,420
+        // queries and across batches.
+        //
+        // The candidate set is deliberately kept exactly as it was: the BVH returns faces from leaf
+        // nodes whose AABB overlaps the query, so it is a superset of true AABB overlaps. An exact
+        // AABB sweep was written and measured faster (12.6 ms vs 22.1 ms of search) but produced 728
+        // partners instead of 940, because `triangle_intersects_sat` skips edge-cross axes with
+        // `norm_squared() <= 1e-6` and so reports near-degenerate pairs as intersecting even when the
+        // two AABBs are disjoint. Those pairs are reachable only through the leaf-union superset.
+        // Upstream's BVH query has the same behaviour, so narrowing the candidate set would trade
+        // parity for speed. Reusing the buffers is free of that trade.
+        let mut stack: Vec<usize> = Vec::new();
+        let mut candidates: Vec<usize> = Vec::new();
         for (bi, row) in vertices.data.chunks_exact(self.n * 3).enumerate() {
             let v = Tensor::new(vec![self.n, 3], row.to_vec())?;
             let bvh = MeshBvh::new(&v, &self.faces)?;
-            for (i, face) in self.faces.data.chunks_exact(3).enumerate() {
-                let tri = std::array::from_fn(|s| {
-                    vec3(&row[face[s] as usize * 3..face[s] as usize * 3 + 3])
-                });
+            for i in 0..f {
+                let tri = self.face_triangle(row, i);
                 let mut lo = tri[0];
                 let mut hi = tri[0];
                 for v in &tri[1..] {
@@ -377,14 +388,13 @@ impl SelfInterpenetrationModule {
                         hi[k] = hi[k].max(v[k]);
                     }
                 }
-                let mut candidates = bvh.overlapping_faces(lo, hi);
+                bvh.overlapping_faces_into(lo, hi, &mut stack, &mut candidates);
                 candidates.sort_unstable();
-                for j in candidates {
+                for &j in candidates.iter() {
                     if i == j || label_masks_intersect(&self.masks[i], &self.masks[j]) {
                         continue;
                     }
-                    let ids = bvh.triangle_indices(j);
-                    let other = ids.map(|v| vec3(&row[v * 3..v * 3 + 3]));
+                    let other = self.face_triangle(row, j);
                     if triangle_intersects_sat(tri, other) {
                         out.data[bi * f + i] = j as f64;
                         break;
@@ -393,6 +403,14 @@ impl SelfInterpenetrationModule {
             }
         }
         Ok(out)
+    }
+
+    /// The three vertices of face `i` from a batch row.
+    fn face_triangle(&self, row: &[f64], i: usize) -> [Vec3; 3] {
+        std::array::from_fn(|s| {
+            let v = self.faces.data[i * 3 + s] as usize * 3;
+            vec3(&row[v..v + 3])
+        })
     }
 }
 /// Whether two sorted, deduplicated label-id masks share at least one label.

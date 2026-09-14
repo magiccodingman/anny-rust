@@ -834,4 +834,34 @@ impl MeshBvh {
         }
         result
     }
+
+    /// Same traversal as [`Self::overlapping_faces`], writing into caller-owned buffers.
+    ///
+    /// The collision search runs one query per face — 27,420 of them on the committed model — and
+    /// each call allocated a traversal stack and a result vector, so this removes ~55k allocations
+    /// per call. The candidate set is identical to `overlapping_faces`; the order is the same
+    /// traversal order, which the caller sorts anyway.
+    pub fn overlapping_faces_into(
+        &self,
+        lo: Vec3,
+        hi: Vec3,
+        stack: &mut Vec<usize>,
+        out: &mut Vec<usize>,
+    ) {
+        stack.clear();
+        out.clear();
+        stack.push(0);
+        while let Some(i) = stack.pop() {
+            let node = &self.nodes[i];
+            if (0..3).any(|k| node.hi[k] < lo[k] || node.lo[k] > hi[k]) {
+                continue;
+            }
+            if node.left == usize::MAX {
+                out.extend_from_slice(&self.order[node.start..node.end]);
+            } else {
+                stack.push(node.left);
+                stack.push(node.right);
+            }
+        }
+    }
 }
