@@ -17,3 +17,5 @@ project/*.svd
 
 # Native build output staged by tools/build-native.sh is intentionally committed under
 # Plugins/, so it is not ignored here.
+player-mono/
+player-il2cpp/
