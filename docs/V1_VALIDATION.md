@@ -98,3 +98,6 @@ The following are intentionally a later product/performance phase:
 5. Profiling-driven serious performance optimization (allocation/workspace reuse, incremental updates, batching/threading, memory/layout and load-time work).
 
 Optional native CUDA/ROCm-specialized backends and qualification against user-supplied licensed SMPL/SMPL-X/AMASS assets may also be added later.
+
+All five items above were delivered after native v1; `PORTING_STATUS.md` records the delivered state and its
+evidence, and `PERFORMANCE.md` records the measurements behind the ones that are intentionally not wired in.

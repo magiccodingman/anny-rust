@@ -39,14 +39,15 @@ These are implemented, but the boundary matters:
 
 The portable product does not attempt Python import/drop-in behavior, PyTorch tensor objects, `torch.compile`, exact Python exception wording, exact PyTorch RNG sequences or exact Warp traversal ordering. Those are implementation/ecosystem details rather than required character-generation capability.
 
-## Deferred product/performance phase
+## Product/performance phase, delivered after native v1
 
-These are explicitly **not complete yet** and are the next major workstream after native v1:
+These five were deferred at native v1 and have since been delivered; the dated evidence is in
+`docs/VALIDATION.md`, `docs/GPU.md`, `docs/PERFORMANCE.md` and the ledger above:
 
-1. **GPU/WebGPU backend** — portable compute/device-buffer path for morphs, FK/skinning and later fitting; optional CUDA/ROCm specialization can follow if useful.
-2. **SIMD tuning** — profiling-guided vectorization/data-layout improvements with portable fallback and numerical qualification.
-3. **Unity package** — supported Runtime/Editor package, native binary packaging, managed ownership, `Mesh`/`SkinnedMeshRenderer`/bone integration, editor controls and baking workflows.
-4. **Complete browser character editor** — interactive preview, shape/face/pose controls, presets, import/export and authoring UI. The WASM runtime itself is already operational.
-5. **Serious performance optimization** — reusable workspaces, allocation reduction, incremental updates, batching/threading, cache/memory layout and load-time improvements driven by profiling.
+1. **GPU/WebGPU backend** — delivered for native and browser targets, parity-qualified against the f32 evaluator (1e-5 bound, 1.8e-7 on coefficients from the shipped phenotype path) and deliberately unwired in the default path, because it is a batch accelerator for dense coefficient workloads only. Optional CUDA/ROCm specialization can follow if useful.
+2. **SIMD tuning** — closed by measurement rather than omission: widening the target CPU is parity-safe and buys 5-15% (`-C target-cpu=x86-64-v3`, opt-in, every pinned digest unchanged), and that ceiling is what rules hand-written SIMD out.
+3. **Unity package** — delivered: Runtime/Editor UPM package with native binary packaging, managed ownership, `Mesh`/`SkinnedMeshRenderer`/bone integration including a humanoid avatar Unity itself accepts, editor controls and baking workflows. EditMode 34/34, PlayMode 10/10, Linux Mono and Linux IL2CPP players built and run.
+4. **Complete browser character editor** — delivered: interactive preview with phenotype/body/face/pose controls, material controls, clip playback, presets and randomize, and GLB export, over the already-operational WASM runtime; 14/14 checks against real Chrome.
+5. **Serious performance optimization** — profiled and re-measured: the fixed per-call cost was redundant tensor validation, the cold prepare path is ~9.5x faster, collision went 64.6 -> 11.4 ms and `derive measure` 8.5 -> 1.24 ms. What remains is decision-gated rather than unmeasured (mmap/zero-copy reload, the collision parity call, a dtype choice); see `docs/PERFORMANCE.md`.
 
 Additional optional future qualification: real user-supplied licensed SMPL/SMPL-X/AMASS data and specialized GPU backends.

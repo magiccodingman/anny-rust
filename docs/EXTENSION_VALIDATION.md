@@ -29,4 +29,8 @@ PR #1 correctly stated that native f32 evaluation, analytic derivatives/`post_gd
 
 Those statements are now historical. PR #2 implements those native-v1 capabilities within the boundaries documented by the current status/compatibility files.
 
-The five major items still intentionally deferred are GPU/WebGPU, SIMD tuning, the Unity package, the complete browser editor and the serious performance-optimization phase.
+The five major items deferred after native v1 are since delivered, each with its own evidence: GPU/WebGPU
+(`docs/GPU.md`, parity-qualified on native and browser targets), SIMD tuning (closed by measurement — a
+parity-safe 5-15% target-CPU ceiling is what rules hand-written SIMD out, `docs/PERFORMANCE.md`), the Unity
+package (EditMode 34/34, PlayMode 10/10, Linux Mono and IL2CPP players), the complete browser editor (14/14
+against real Chrome) and the profiling-driven performance phase (re-measured in `docs/PERFORMANCE.md`).

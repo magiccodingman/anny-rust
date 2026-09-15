@@ -455,10 +455,13 @@ are unchanged to the last digit.
    the next step there is mmap or zero-copy (`safetensors` exposes the buffer; validating lazily on
    first use would trade the scan for weaker guarantees and needs a deliberate decision), or avoiding
    materializing blendshapes a configuration never uses.
-5. **GPU/WebGPU, Unity integration, browser editor** — untouched. Session exposure to the CLI, C, C#,
-   WASM and the browser is done and tested, so the 1.5-2x is reachable from those callers; a Unity
-   package and a real editor UI are still missing, and both need a harness this repository does not
-   have (no Unity install, and the browser check only covers the API-level page).
+5. **GPU/WebGPU, Unity integration, browser editor — delivered after this ranking was written.** The GPU
+   kernel is parity-qualified on native and browser targets and left unwired by measurement (item 1 of
+   `docs/GPU.md`); the Unity package ships with EditMode 34/34 and PlayMode 10/10, including a humanoid
+   avatar Unity itself accepts; the browser editor passes 14/14 against real Chrome. What remains here is
+   not unmeasured work but the same decision the collision item carries: wiring a stage whose measured
+   win does not exist yet. Session exposure to the CLI, C, C#, WASM and the browser is done and tested,
+   so the caller-side 1.5-2x is reachable from them.
 
 ## Status
 
