@@ -430,13 +430,23 @@ are unchanged to the last digit.
    verified. What remains is the per-call `MeshBvh::new` (12.9 ms of the 29.8) plus the ~1.07M-candidate
    narrow phase; the exact-AABB alternative is faster but changes the answer (see above), so the next
    step here would need to be a deliberate parity decision rather than a pure optimization.
+   Re-measured 2026-09-15: the whole `derive collision` request is **11.395 ms min / 12.452 ms median**
+   (`cargo bench -p anny-core --bench runtime`), so the BVH build is now taking most of a much smaller
+   number. The parity argument still stands and is not something a benchmark can settle.
 2. **Per-character accumulation is closed as "measured, at the hardware limit"** — see finding 1a. No
    vectorization, unrolling, sparsity, or loop-order win is available; the remaining 286 us/character
    is 1.32M element-pairs of inherent work. If this must get faster, the change has to be numerical
    (f32 storage, half the traffic) rather than structural, and that is a dtype decision, not an
    optimization.
-3. **`derive measure` (8.5 ms)** — find out whether it is the measurement's geometry queries or its
-   per-request construction.
+3. **`derive measure` — answered, and the 8.5 ms is stale.** The 8.5 ms was eager failure-message
+   construction in `Tensor::checked_indices` (7.9 ms of it, per that function's own comment); it now
+   builds the message only on failure. Re-measured 2026-09-15: **1.238 ms min / 1.590 ms median** in
+   `cargo bench -p anny-core --bench runtime`. The split
+   (`cargo run -p anny-core --release --example measure_split`): forward 0.648 ms, per-request
+   `Anthropometry::new` **0.556 ms**, the geometry query itself 0.098 ms — so if anything is left to
+   take, it is the construction (5.7x the query), not the queries. Caching the anthropometry per model
+   would remove 0.556 ms of a 1.30 ms request and is exact by construction; it is not done because a
+   measurement is an occasional request, not a per-frame one.
 4. **Startup: cold preparation is down to 223-240 ms (was 2140.9 ms, ~9.5x) and the reload is 29.5 ms
    (f32) / 66.1 ms (f64), each ~2.1x faster than the sequential decoder.** The
    remaining prepare cost is spread thin — the 624 target files at 76-85 ms, the vertex gather at
