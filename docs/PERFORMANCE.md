@@ -174,7 +174,7 @@ unaffected: it keys on config plus asset fingerprint and verifies the sha256 it 
 | `session f32 typed full call` | 0.436 ms | 0.453 ms |
 | `derive measure` | 8.497 ms | 8.605 ms |
 | `derive keypoints` | 1.370 ms | 1.696 ms |
-| `derive collision` | 29.866 ms | 31.450 ms |
+| `derive collision` | 20.522 ms | 21.178 ms |
 | `derive pose-convert world` | 0.655 ms | 0.774 ms |
 
 ## Findings
@@ -239,7 +239,7 @@ caller actually depends on.
 **4. Collision was the single biggest outlier by an order of magnitude, and is now 2.2x cheaper.**
 `derive collision` cost 60.6 ms — ~100x a full generation of the same character. The split was
 measured: module construction 15.1 ms, search 47.6 ms. Neither was a validation scan. It now costs
-**29.8 ms**, with the output bit-identical to before (the digest below).
+**20.5 ms**, with the output bit-identical to before (the digest below).
 
 - Construction built a per-vertex `BTreeSet<String>` of bone labels and a per-face merged label set
   (13,718 sets, ~82k `String` clones over 27,420 faces). **Fixed**: labels are interned once into a
@@ -268,6 +268,16 @@ measured: module construction 15.1 ms, search 47.6 ms. Neither was a validation 
   test suite, which had no collision coverage at all. That digest is now a test
   (`tests/collision_native.rs`), and the predicate is named positively (`label_masks_intersect`) so the
   same inversion reads as visibly wrong.
+
+- **The search is now parallel, and that is the one collision change with no parity trade.** Each face
+  searches with its own traversal buffers and writes only its own slot in the output array, so the
+  answers and the array are the ones the sequential loop produced; only the wall clock changes.
+  `derive collision` 30.641 → **20.522 ms** (21.178 median), digest unchanged (940 partners,
+  checksum 287201168586). The remaining 20.5 ms is the BVH build (12.9 ms, still serial) plus ~7.6 ms
+  of searching across 1.07M candidate pairs. Parallelising the build is not in the same category:
+  subtree construction would allocate nodes in a different order, which the `sort_unstable()` on the
+  candidate list happens to tolerate today but nothing in the code guarantees, so it needs the same
+  deliberate decision the exact-AABB rewrite needed — and that one lost parity.
 
 **5. `derive measure` and `derive keypoints` construct their module per request**, which was the
 dominant cost until the eager-`format!` fix above (7.9 ms and 30.6 ms of construction respectively).

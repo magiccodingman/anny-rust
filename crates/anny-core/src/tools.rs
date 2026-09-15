@@ -373,36 +373,82 @@ impl SelfInterpenetrationModule {
         // two AABBs are disjoint. Those pairs are reachable only through the leaf-union superset.
         // Upstream's BVH query has the same behaviour, so narrowing the candidate set would trade
         // parity for speed. Reusing the buffers is free of that trade.
-        let mut stack: Vec<usize> = Vec::new();
-        let mut candidates: Vec<usize> = Vec::new();
+        let threads = std::thread::available_parallelism()
+            .map_or(1, std::num::NonZeroUsize::get)
+            .min(f)
+            .max(1);
         for (bi, row) in vertices.data.chunks_exact(self.n * 3).enumerate() {
             let v = Tensor::new(vec![self.n, 3], row.to_vec())?;
             let bvh = MeshBvh::new(&v, &self.faces)?;
-            for i in 0..f {
-                let tri = self.face_triangle(row, i);
-                let mut lo = tri[0];
-                let mut hi = tri[0];
-                for v in &tri[1..] {
-                    for k in 0..3 {
-                        lo[k] = lo[k].min(v[k]);
-                        hi[k] = hi[k].max(v[k]);
-                    }
+            let row_out = &mut out.data[bi * f..(bi + 1) * f];
+            // Each face searches with its own traversal buffers and writes only its own slot, so the
+            // answer and the array are exactly what the sequential loop produced: only the wall clock
+            // changes.
+            if threads == 1 || f < PARALLEL_COLLISION_FACES {
+                let mut stack = Vec::new();
+                let mut candidates = Vec::new();
+                for (i, value) in row_out.iter_mut().enumerate() {
+                    *value = self.first_collision(&bvh, row, i, &mut stack, &mut candidates);
                 }
-                bvh.overlapping_faces_into(lo, hi, &mut stack, &mut candidates);
-                candidates.sort_unstable();
-                for &j in candidates.iter() {
-                    if i == j || label_masks_intersect(&self.masks[i], &self.masks[j]) {
-                        continue;
-                    }
-                    let other = self.face_triangle(row, j);
-                    if triangle_intersects_sat(tri, other) {
-                        out.data[bi * f + i] = j as f64;
-                        break;
-                    }
-                }
+                continue;
             }
+            let per = f.div_ceil(threads);
+            let bvh = &bvh;
+            std::thread::scope(|scope| {
+                for (chunk, slot) in row_out.chunks_mut(per).enumerate() {
+                    let first = chunk * per;
+                    scope.spawn(move || {
+                        let mut stack = Vec::new();
+                        let mut candidates = Vec::new();
+                        for (offset, value) in slot.iter_mut().enumerate() {
+                            *value = self.first_collision(
+                                bvh,
+                                row,
+                                first + offset,
+                                &mut stack,
+                                &mut candidates,
+                            );
+                        }
+                    });
+                }
+            });
         }
         Ok(out)
+    }
+
+    /// The index of the first face that intersects face `i`, or `-1.0`.
+    ///
+    /// The traversal buffers belong to the caller so that a search reuses them across faces instead of
+    /// allocating per query, which is what makes the parallel path above cheap to fan out.
+    fn first_collision(
+        &self,
+        bvh: &MeshBvh,
+        row: &[f64],
+        i: usize,
+        stack: &mut Vec<usize>,
+        candidates: &mut Vec<usize>,
+    ) -> f64 {
+        let tri = self.face_triangle(row, i);
+        let mut lo = tri[0];
+        let mut hi = tri[0];
+        for v in &tri[1..] {
+            for k in 0..3 {
+                lo[k] = lo[k].min(v[k]);
+                hi[k] = hi[k].max(v[k]);
+            }
+        }
+        bvh.overlapping_faces_into(lo, hi, stack, candidates);
+        candidates.sort_unstable();
+        for &j in candidates.iter() {
+            if i == j || label_masks_intersect(&self.masks[i], &self.masks[j]) {
+                continue;
+            }
+            let other = self.face_triangle(row, j);
+            if triangle_intersects_sat(tri, other) {
+                return j as f64;
+            }
+        }
+        -1.
     }
 
     /// The three vertices of face `i` from a batch row.
@@ -413,6 +459,10 @@ impl SelfInterpenetrationModule {
         })
     }
 }
+/// Faces below which the collision search stays on the calling thread: a handful of faces cannot pay
+/// for the fan-out, and the per-face cost is what decides the split above this threshold.
+const PARALLEL_COLLISION_FACES: usize = 1 << 10;
+
 /// Whether two sorted, deduplicated label-id masks share at least one label.
 ///
 /// This is the inner test of the collision search and runs once per candidate face pair, so it is a
