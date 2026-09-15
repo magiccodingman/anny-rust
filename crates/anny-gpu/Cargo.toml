@@ -23,3 +23,7 @@ wgpu = { version = "26", default-features = false, features = ["webgpu", "wgsl",
 js-sys = { workspace = true }
 wasm-bindgen = { workspace = true }
 wasm-bindgen-futures = "0.4.43"
+
+[dev-dependencies]
+# The parity test drives coefficients through the shipped phenotype path, whose parameters are JSON.
+serde_json = { workspace = true }

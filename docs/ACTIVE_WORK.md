@@ -44,9 +44,13 @@ The following remain the major successor workstream:
 1. GPU/WebGPU backend — done on both targets: `crates/anny-gpu` runs the blendshape
    contraction on wgpu/Vulkan natively and on the browser's WebGPU, with parity tests, a
    sparsity-aware crossover and the 7-check browser qualification recorded in `docs/GPU.md`.
-   It still stays behind the measured numbers instead of in the default path: the ceiling is
-   1.5-1.8x of `rest_model` even if the stage were free, and it is a loss for sparse poses
-   below batch ~16.
+   Parity is now demonstrated on production input as well: the test drives coefficients through
+   `Anny::coefficients` — the shipped phenotype path — instead of a synthetic vector and holds
+   the same `1e-5` bound, measuring 1.8e-7 for the default character and 2.4e-7 .. 4.8e-7 for
+   two batched variations. It still stays behind the measured numbers instead of in the default
+   path: the ceiling is 1.5-1.8x of `rest_model` even if the stage were free, and it is a loss
+   below batch ~16 whatever the sparsity — "sparse" describes the neutral character, since
+   varying the phenotypes switches 46-56% of the vector on.
 2. SIMD tuning.
 3. Unity Runtime/Editor package.
 4. Complete browser character editor.

@@ -32,9 +32,21 @@ the 102.7 MB blendshape tensor every call and is slower still.
 
 **The crossover depends on how many coefficients a workload switches on.** Both kernels
 skip zero coefficients (`w == 0.0`), so a sparse set touches only its active rows on
-either side — and real sets are sparse: the default character switches on **32 of 624
-coefficients (5.13%)**. Both ends measured through the same code path
-(`examples/real_batch.rs`, RTX 3090):
+either side — and the *neutral* character is sparse: the default parameters switch on
+**32 of 624 coefficients (5.13%)**. Sparsity is a property of the parameter values, not of
+the path, and the parity test now drives coefficients through the shipped phenotype path
+and counts what real variations cost; any deviation from neutral switches most of the vector
+on, because every blend shape becomes slightly nonzero:
+
+| phenotype input through `Anny::coefficients` | nonzero | above 1e-3 |
+|---|---:|---:|
+| default character | 32 / 624 | 32 |
+| four rows nudged by ±0.02 | 288 / 624 | 248 |
+| four rows spread across the range | 352 / 624 | 351 |
+
+So the sparse column below describes the neutral character, and a parameterized batch lands
+between the two columns, nearer the dense one for anything actually varied. Both ends
+measured through the same code path (`examples/real_batch.rs`, RTX 3090):
 
 | coefficients | batch 1 | batch 16 | batch 64 | batch 256 |
 |---|---:|---:|---:|---:|
@@ -44,19 +56,23 @@ coefficients (5.13%)**. Both ends measured through the same code path
 | dense speedup | **0.65x** | 5.50x | 12.18x | **17.13x** |
 
 Parity at the real 5.13% sparsity is max abs 1.8e-7 .. 2.4e-7, so the skip is numerically
-neutral. An earlier revision of this table was measured with dense synthetic coefficients
-only and reported up to 17.8x as if it were the general case; it is the dense end, and the
-sparse end is what typical poses hit.
+neutral; on coefficients taken from the shipped phenotype path the same test measures 1.8e-7
+for the default character, 2.4e-7 for the ±0.02 batch and 4.8e-7 for the spread batch. An
+earlier revision of this table was measured with dense synthetic coefficients only and
+reported up to 17.8x as if it were the general case; it is the dense end, and the sparse end
+is the neutral character rather than "typical poses" — the two columns are a bracket, not a
+choice between a general and a special case.
 
 At real sparsity the stage costs **0.14-0.19 ms of a 0.437 ms `rest_model`** (two runs of
 the two examples; run-to-run spread is ~30%), so even an infinitely fast stage would speed
 up the rest model by only **1.5-1.8x**, and less end-to-end — load, pose, skinning and
 export are untouched.
 
-Decision: the GPU path is a **batch accelerator for dense coefficient workloads** (for
-example random phenotype sampling that switches most blendshapes on) and a **loss for
-typical sparse poses below batch ~16**. Realized sparsity, not batch size alone, decides
-it, so it is not wired into the evaluator's default path.
+Decision: the GPU path is a **batch accelerator for dense coefficient workloads**, which is
+what a varied phenotype batch is (46-56% of the vector active in the measurements above),
+and a **loss at small batch whatever the sparsity** (0.04x neutral, 0.65x dense at batch 1).
+Both the batch size and the realized sparsity decide it, so it is not wired into the
+evaluator's default path.
 
 ## Parity
 
@@ -78,8 +94,23 @@ For scale: the f32 evaluator differs from the **f64** reference by up to `8.3e-7
 the same input. The GPU's deviation at B=1 (`4.2e-7`) is *smaller* than the gap the
 project already accepts between its own two precision paths, and three orders of
 magnitude below the `1e-3` tolerance the Unity bake tests use.
-`crates/anny-gpu/tests/parity.rs` asserts `<= 1e-5` absolute and asserts the resident
-path reproduces the one-shot path bit for bit.
+
+`crates/anny-gpu/tests/parity.rs` asserts `<= 1e-5` absolute and asserts the resident path
+reproduces the one-shot path bit for bit. A third case drives its coefficients through the
+shipped phenotype path (`Anny::coefficients`) rather than a synthetic vector — the default
+character plus two batched variations — and asserts the same bound, so parity is demonstrated
+on production-derived input and not only on a synthetic pattern.
+
+### One instance at a time
+
+`wgpu::Instance::new` is serialized process-wide (`OPEN_LOCK` in `crates/anny-gpu/src/lib.rs`),
+because it is the call that reaches `vkCreateInstance` and, with it, the Vulkan loader's
+`dlopen` of the Mesa layers. Where an interposing `LD_PRELOAD` shim is not thread-safe this is
+a hard crash rather than a slow path: with NoMachine's `libnxegl.so` present, this suite aborted
+with `double free or corruption (fasttop)` in **7 of 25 runs** and in **0 of 25** with the lock
+in place — same binary otherwise, and 0 of 25 with `LD_PRELOAD` cleared as a control. Creation
+happens once per process, so serializing it costs nothing measurable, and the guard is released
+before the first `await` so the returned future stays `Send`.
 
 ## llvmpipe is not an accelerator
 

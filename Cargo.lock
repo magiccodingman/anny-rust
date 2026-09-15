@@ -58,6 +58,7 @@ dependencies = [
  "anny-core",
  "js-sys",
  "pollster",
+ "serde_json",
  "thiserror",
  "wasm-bindgen",
  "wasm-bindgen-futures",

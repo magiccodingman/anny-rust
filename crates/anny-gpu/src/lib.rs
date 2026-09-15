@@ -34,6 +34,17 @@ pub struct Gpu {
     pub queue: wgpu::Queue,
 }
 
+/// Instances are created one at a time, process-wide.
+///
+/// `vkCreateInstance` `dlopen`s the Vulkan layers, and an interposing
+/// `LD_PRELOAD` shim is not necessarily thread-safe: with NoMachine's
+/// `libnxegl.so` loaded, three threads creating instances at once abort the
+/// process with `double free or corruption (fasttop)` in ~25% of runs, and in
+/// 0% of runs with `LD_PRELOAD` cleared. Creation happens once per process, so
+/// serializing it costs nothing measurable.
+#[cfg(not(target_arch = "wasm32"))]
+static OPEN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 impl Gpu {
     /// Open the first adapter `wgpu` offers (blocks; native only).
     #[cfg(not(target_arch = "wasm32"))]
@@ -55,11 +66,18 @@ impl Gpu {
     /// WebGPU has no adapter enumeration, so `needle` only refines the choice
     /// natively; in a browser we get whichever adapter the user agent picks.
     pub async fn open_async(needle: Option<&str>) -> Result<Self, GpuError> {
+        // `Instance::new` is the call that reaches `vkCreateInstance`, and with
+        // it the loader's `dlopen` of the Vulkan layers, so that is the part
+        // that must not run concurrently; the guard is released before any
+        // await, so this does not make the returned future `!Send`.
         #[cfg(not(target_arch = "wasm32"))]
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::from_env().unwrap_or(wgpu::Backends::all()),
-            ..Default::default()
-        });
+        let instance = {
+            let _guard = OPEN_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            wgpu::Instance::new(&wgpu::InstanceDescriptor {
+                backends: wgpu::Backends::from_env().unwrap_or(wgpu::Backends::all()),
+                ..Default::default()
+            })
+        };
         #[cfg(target_arch = "wasm32")]
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::BROWSER_WEBGPU,

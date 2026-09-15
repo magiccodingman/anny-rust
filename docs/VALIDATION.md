@@ -209,11 +209,25 @@ tolerance. One intermediate failure was a wrong expectation in the test, not a d
 one frame apart span two frames, so the clip is `(keys - 1) / frameRate` seconds long, which is what the
 bakery already returned.
 
-## Rust gates, re-run after the Unity work (2026-09-15)
+## Rust gates after the GPU production-parity work (2026-09-15)
 
-`cargo fmt --all -- --check` clean; `cargo test --workspace --locked` 98 passed, 0 failed, 16 ignored
-across 31 suites; `cargo clippy --workspace --all-targets --locked -- -D warnings` clean;
-`cargo check -p anny-wasm --target wasm32-unknown-unknown --locked` clean. No Rust source changed in
-this window (the commits since `214ba09` touch `integrations/unity/`, `docs/` and tooling only), so
-the previously pinned release-mode digests and the 114-test release run still describe this tree. The
+`cargo fmt --all --check` clean; `cargo test --workspace --release` **101 passed, 0 failed, 16
+ignored** across 34 suites; `cargo clippy --workspace --all-targets --release` clean;
+`cargo check -p anny-wasm --target wasm32-unknown-unknown --locked` clean. Two of the three
+`anny-gpu` parity tests changed in this window, so the previously pinned release-mode digests and
+the earlier release run no longer describe this tree; the numbers above are the current run. The
 16 ignored tests are the opt-in ones (authoring regeneration and fixtures).
+
+`ANNY_REQUIRE_GPU=1 cargo test -p anny-gpu --release` **3 passed** — the strict gate, which turns the
+"no adapter" skip into a failure, so a run that never reached the GPU cannot be mistaken for a passing
+one. It measures the kernel against the f32 evaluator for synthetic vectors (9.5e-7 at batch 1 through
+1.9e-6 at batch 64) and, in a third case, for coefficients taken from the shipped phenotype path: 1.8e-7
+for the default character, 2.4e-7 and 4.8e-7 for two batched variations, all inside the 1e-5 bound, with
+the resident-weights path bit-identical to the one-shot path.
+
+That suite also exposed a real crash, since fixed: with three tests creating instances at once it
+aborted with `double free or corruption (fasttop)` in 7 of 25 runs. The fault is not in this project —
+`vkCreateInstance` `dlopen`s the Vulkan layers, and this host preloads NoMachine's `libnxegl.so`, whose
+`dlopen` interposer is not thread-safe (the same binary aborted in 0 of 25 runs with `LD_PRELOAD`
+cleared). `Gpu::open` now holds a process-wide lock across `Instance::new`, which took the same binary
+to 0 of 25; see `docs/GPU.md`.

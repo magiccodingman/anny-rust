@@ -5,8 +5,9 @@
 //! Both tests skip when no model or no GPU adapter is present, so `cargo test`
 //! stays green on machines without either.
 
+use anny_core::model::{Anny, Parameters};
 use anny_core::typed::{apply_blendshapes, TensorF32};
-use anny_core::ModelData;
+use anny_core::{AnnyConfig, ModelData};
 use anny_gpu::blendshapes::{BlendshapeKernel, Weights};
 use anny_gpu::Gpu;
 
@@ -124,4 +125,101 @@ fn resident_weights_reproduce_the_one_shot_path_exactly() {
         one_shot, resident,
         "resident weights must reproduce the one-shot path bit for bit"
     );
+}
+
+/// Four phenotype vectors close to the default — each row nudges every phenotype a little, which is
+/// how a batch is built in practice.
+fn near_default(anny: &Anny) -> Parameters {
+    let mut parameters = Parameters::default();
+    let mut kwargs = serde_json::Map::new();
+    for (index, label) in anny.phenotype_labels.iter().enumerate() {
+        let values: Vec<f64> = (0..4)
+            .map(|row| 0.5 + 0.02 * (((row + index) % 3) as f64 - 1.0))
+            .collect();
+        kwargs.insert(label.clone(), serde_json::json!(values));
+    }
+    parameters.phenotype_kwargs = serde_json::Value::Object(kwargs);
+    parameters
+}
+
+/// Four phenotype vectors spread across the phenotype range: most blend shapes end up partly active,
+/// which is the dense end of what the phenotype path can produce.
+fn spread(anny: &Anny) -> Parameters {
+    let mut parameters = Parameters::default();
+    let mut kwargs = serde_json::Map::new();
+    for (index, label) in anny.phenotype_labels.iter().enumerate() {
+        let values: Vec<f64> = (0..4)
+            .map(|row| 0.25 + 0.5 * (((row + index) % 4) as f64) / 3.0)
+            .collect();
+        kwargs.insert(label.clone(), serde_json::json!(values));
+    }
+    parameters.phenotype_kwargs = serde_json::Value::Object(kwargs);
+    parameters
+}
+
+/// The comparisons above run on synthetic coefficient vectors. Production coefficients arrive from
+/// the phenotype path instead and are what the kernel would actually be handed, so the same bound is
+/// asserted on those.
+///
+/// Sparsity is a property of the phenotype values rather than of the path, so it is asserted only
+/// where it is the published figure (the default character) and printed for the rest; the active
+/// counts below are the evidence that the inputs are real ones.
+#[test]
+fn production_coefficients_agree_with_the_f32_evaluator() {
+    let Some((gpu, data, template, blendshapes, c)) = fixture() else {
+        return;
+    };
+    let anny = Anny::from_model_data(data, AnnyConfig::default()).expect("model builds");
+    let kernel = BlendshapeKernel::new(&gpu).expect("kernel builds");
+
+    for (label, parameters, batch, sparse) in [
+        ("default phenotype", Parameters::default(), 1usize, true),
+        (
+            "four near-default phenotypes",
+            near_default(&anny),
+            4,
+            false,
+        ),
+        ("four spread phenotypes", spread(&anny), 4, false),
+    ] {
+        let coefficients = anny.coefficients(&parameters).expect("coefficients");
+        let coefficients = TensorF32::from_reference(&coefficients).expect("f32 coefficients");
+        let active = coefficients.data.iter().filter(|v| **v != 0.0).count();
+        // The kernel's zero-skip works on exact zeros, so the crossover turns on `active`; the
+        // second count says how much of that is a real shape rather than an epsilon.
+        let significant = coefficients.data.iter().filter(|v| v.abs() > 1e-3).count();
+        println!(
+            "{label}: {active} of {c} coefficients active, {significant} above 1e-3, batch {batch}"
+        );
+
+        assert_eq!(
+            coefficients.shape,
+            vec![batch, c],
+            "{label}: coefficient shape"
+        );
+        if sparse {
+            assert!(
+                active < c / 4,
+                "{label}: the default character's coefficients are sparse, but {active} of {c} are active"
+            );
+        }
+
+        let reference = apply_blendshapes(&template, &blendshapes, &coefficients).unwrap();
+        let gpu_out = kernel
+            .run(
+                &gpu,
+                &template.data,
+                &blendshapes.data,
+                &coefficients.data,
+                batch,
+                c,
+            )
+            .expect("kernel runs");
+        let diff = deviation(&gpu_out, &reference.data);
+        println!("{label}: max abs diff {diff:.3e}");
+        assert!(
+            diff <= MAX_ABS_DIFF,
+            "{label}: GPU differs from the f32 evaluator by {diff:.3e}"
+        );
+    }
 }

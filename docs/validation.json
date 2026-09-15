@@ -171,7 +171,10 @@
       "passed": true
     }
   ],
-  "native_tests": 111,
+  "gpu_parity": "crates/anny-gpu/tests/parity.rs under ANNY_REQUIRE_GPU=1 on an NVIDIA RTX 3090 (Vulkan): the GPU kernel matches anny_core::typed::apply_blendshapes within 1e-5 absolute for synthetic vectors (9.5e-7 at batch 1, 1.4e-6 at 4, 1.6e-6 at 16, 1.9e-6 at 64) and for coefficients taken from the shipped phenotype path (1.8e-7 for the default character, 2.4e-7 for a batch nudged by 0.02, 4.8e-7 for a batch spread across the phenotype range); the resident-weights path reproduces the one-shot path bit for bit and the llvmpipe control is bit-exact",
+  "gpu_parity_tested": true,
+  "native_tests": 117,
+  "native_tests_detail": "cargo test --workspace --release: 101 passed, 0 failed, 16 ignored across 34 suites (2026-09-15; 3 of the passing tests are the GPU parity cases under ANNY_REQUIRE_GPU=1)",
   "payload_reproducible": "the same build writes byte-identical prepared payloads (f64 and f32) in every process; the safetensors header is re-emitted with its keys sorted because the crate serializes __metadata__ straight out of a HashMap",
   "real_smpl_assets_tested": false,
   "reference_data_version": 11,
