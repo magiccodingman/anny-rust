@@ -135,36 +135,41 @@ Equivalence evidence, since "same output" is the entire point:
 - The bench rows outside the prepare group are unchanged, so nothing here traded against generation or
   the session path.
 
-### Widening the target CPU: parity-safe, measured, and not worth baking in
+### Widening the target CPU: parity-safe, a real 5-15%, and still not baked in
 
 The release profile sets `lto = "thin"` and no `target-cpu`, so the shipped binary targets baseline
 x86-64 — SSE2 only. Widening that is the one CPU-level change that cannot move a result: LLVM
 vectorizes floating point this way only without fast-math, which rustc does not enable, so the
-operations and their order are the same and only their width changes. Both widened targets were
-measured on this machine, and both kept every pinned digest byte-identical (114 passed, 0 failed,
-including the prepared-payload, collision, fitting and motion oracles).
+operations and their order are the same and only their width changes. Both widened targets kept every
+pinned digest byte-identical (114 passed, 0 failed, including the prepared-payload, collision, fitting
+and motion oracles).
+
+All three columns below come from a single run of `cargo bench -p anny-core --bench runtime`, in that
+order, because comparing columns measured in different runs is how this table was wrong the first time:
 
 | row (min / median ms) | default | `x86-64-v3` | `native` |
 | --- | --- | --- | --- |
-| generate f32 typed lbs | 0.434 / 0.442 | 0.408 / 0.416 | 0.415 / 0.423 |
-| generate f32 typed dqs | 0.923 / 0.932 | 0.874 / 0.907 | 0.954 / 1.039 |
-| generate f32 typed warp_lbs | 0.433 / 0.449 | 0.462 / 0.481 | 0.429 / 0.490 |
-| split rest_model default | 0.311 / 0.337 | 0.292 / 0.302 | 0.275 / 0.282 |
+| generate f64 dqs | 1.170 / 1.334 | 1.053 / 1.194 | 1.025 / 1.115 |
+| generate f32 typed lbs | 0.442 / 0.465 | 0.408 / 0.416 | 0.415 / 0.423 |
+| generate f32 typed dqs | 0.925 / 0.986 | 0.874 / 0.907 | 0.954 / 1.039 |
+| generate f32 typed warp_lbs | 0.526 / 0.620 | 0.462 / 0.481 | 0.429 / 0.490 |
+| split rest_model default | 0.309 / 0.335 | 0.292 / 0.302 | 0.275 / 0.282 |
 
-That is roughly 5% on average and mixed in sign — `warp_lbs` regresses under both. So it is not baked
-into the build: it buys little and narrows the CPUs the published binary runs on. It is worth passing
-for a local benchmark (`RUSTFLAGS="-C target-cpu=x86-64-v3"`), and the table above is what to expect.
+That is roughly 5-15% on almost every row, and one row (`f32 typed dqs` under `native`) is slightly
+worse. It stays opt-in rather than baked in: the gain does not justify making the published binary
+require AVX2. Pass `RUSTFLAGS="-C target-cpu=x86-64-v3"` for a local build, or `native` for a machine
+you control, and expect the numbers above.
 
-The more useful result is what this rules out. The kernels are not vectorization-bound, so hand-written
-SIMD would be chasing the wrong bottleneck. Should it ever be attempted anyway, two constraints apply,
-both learned from this code rather than assumed:
+The useful part is what this rules out. A 5-15% ceiling from autovectorization means the kernels are
+not vectorization-bound, so hand-written SIMD would be chasing the wrong bottleneck. Were it attempted
+anyway, two constraints apply, both read off this code rather than assumed:
 
 * `point()` is nalgebra's `Matrix4 * Vector3`, a summed gemv. A hand-written replacement only stays
   bit-exact if it accumulates in the same order, so the inner product may not be restructured for
-  lanes without the collision of last bits — the digests would catch it, but the fix is not free.
+  lanes without moving last bits — the digests would catch it, but the fix is not free.
 * The linear-blend loop skips influences whose weight is exactly zero. A masked SIMD version must
-  *select* rather than add zero: adding `0.0` to a `-0.0` accumulator yields `+0.0`, which is a
-  different bit pattern and a different answer at the digest level.
+  *select* rather than add zero: adding `0.0` to a `-0.0` accumulator yields `+0.0`, a different bit
+  pattern and a different digest.
 
 ### Zero-copy loading: what an mmap path would preserve, and why it is not taken
 Loading still copies: `ArchiveF32::from_bytes` deserializes the file and `decode` produces owned
