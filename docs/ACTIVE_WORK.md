@@ -86,7 +86,7 @@ If further agentic work is performed in a transient browser environment, keep us
 ### Unity is integrated, validated in the editor, and now in real players, with editor controls, physics and humanoid avatars
 
 `integrations/unity/` holds UPM package `com.magiccodingman.anny` (native plugin, runtime, editor
-tooling, tests) plus the host project the tests run in. EditMode 34/34 and PlayMode 10/10 pass against
+tooling, tests) plus the host project the tests run in. EditMode 34/34 and PlayMode 11/11 pass against
 the real editor and a real model; see VALIDATION.md for the numbers and the two defects the runs found.
 `AnnyHumanoid` adds a Unity humanoid avatar for the rig, accepted by Unity itself (`valid=True
 human=True`); what the humanoid definition cannot carry is named in `integrations/unity/README.md`.

@@ -474,7 +474,7 @@ marshalling and `SafeHandle` handling are not a cliff worth optimising.
    materializing blendshapes a configuration never uses.
 5. **GPU/WebGPU, Unity integration, browser editor — delivered after this ranking was written.** The GPU
    kernel is parity-qualified on native and browser targets and left unwired by measurement (item 1 of
-   `docs/GPU.md`); the Unity package ships with EditMode 34/34 and PlayMode 10/10, including a humanoid
+   `docs/GPU.md`); the Unity package ships with EditMode 34/34 and PlayMode 11/11, including a humanoid
    avatar Unity itself accepts; the browser editor passes 14/14 against real Chrome. What remains here is
    not unmeasured work but the same decision the collision item carries: wiring a stage whose measured
    win does not exist yet. Session exposure to the CLI, C, C#, WASM and the browser is done and tested,

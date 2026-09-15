@@ -32,5 +32,6 @@ Those statements are now historical. PR #2 implements those native-v1 capabiliti
 The five major items deferred after native v1 are since delivered, each with its own evidence: GPU/WebGPU
 (`docs/GPU.md`, parity-qualified on native and browser targets), SIMD tuning (closed by measurement — a
 parity-safe 5-15% target-CPU ceiling is what rules hand-written SIMD out, `docs/PERFORMANCE.md`), the Unity
-package (EditMode 34/34, PlayMode 10/10, Linux Mono and IL2CPP players), the complete browser editor (14/14
-against real Chrome) and the profiling-driven performance phase (re-measured in `docs/PERFORMANCE.md`).
+package (EditMode 34/34, PlayMode 11/11, Linux Mono and IL2CPP players with their per-update cost
+measured), the complete browser editor (14/14 against real Chrome) and the profiling-driven performance
+phase (re-measured in `docs/PERFORMANCE.md`).
