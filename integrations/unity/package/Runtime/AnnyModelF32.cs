@@ -43,6 +43,15 @@ namespace Anny
             return AnnyNative.OutputF32Tensor(handle, name, out AnnyTensorViewF32 _) == AnnyNative.StatusOk;
         }
 
+        /// <summary>
+        /// True once the native model has been released. Safe to read after disposal, unlike the
+        /// tensors, which are only valid while the model is alive.
+        /// </summary>
+        public bool IsDisposed
+        {
+            get { return disposed || handle == null || handle.IsClosed || handle.IsInvalid; }
+        }
+
         public void Dispose()
         {
             if (disposed)
@@ -164,6 +173,14 @@ namespace Anny
             string json = parameters != null ? parameters.ToJson() : "{}";
             AnnyNative.Check(AnnyNative.SessionF32New(handle, json, out IntPtr session));
             return new AnnyPoseSessionF32(this, new AnnySessionF32Handle(session));
+        }
+
+        /// <summary>
+        /// True once the native model has been released. Safe to read after disposal.
+        /// </summary>
+        public bool IsDisposed
+        {
+            get { return disposed || handle == null || handle.IsClosed || handle.IsInvalid; }
         }
 
         public void Dispose()

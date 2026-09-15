@@ -65,6 +65,18 @@ namespace Anny.Tests
         }
 
         /// <summary>Loads the prepared model.</summary>
+        /// <summary>The prepared model's path, as the suites refer to it.</summary>
+        public static string PreparedModelPath
+        {
+            get { return Path; }
+        }
+
+        /// <summary>Vertex count of the model the suites run against.</summary>
+        public const int ExpectedVertices = 13718;
+
+        /// <summary>Bone count of the model the suites run against.</summary>
+        public const int ExpectedBones = 104;
+
         public static AnnyModel Load()
         {
             return AnnyModel.Load(Path);

@@ -15,6 +15,11 @@ namespace Anny
         [Tooltip("The prepared model payload (.bytes), exactly as written by anny prepare.")]
         public TextAsset payload;
 
+        /// <summary>
+        /// In-memory prepared payload, used when a <see cref="TextAsset"/> is not available.
+        /// </summary>
+        public byte[] payloadBytes;
+
         [Tooltip("Load the runtime copy at single precision. The f64 model is the authority.")]
         public bool singlePrecision = true;
 
@@ -64,6 +69,35 @@ namespace Anny
         }
 
         /// <summary>Fills the cached description from a live model.</summary>
+        /// <summary>
+        /// Builds an asset for a payload that already exists in memory. Nothing is written to
+        /// disk; serialize it with the editor tools if it needs to persist.
+        /// </summary>
+        public static AnnyModelAsset CreateInMemory(byte[] payload, string descriptionJson = null, bool singlePrecision = true)
+        {
+            if (payload == null || payload.Length == 0)
+            {
+                throw new ArgumentException("payload is empty", nameof(payload));
+            }
+
+            AnnyModelAsset asset = CreateInstance<AnnyModelAsset>();
+            asset.payloadBytes = payload;
+            asset.descriptionJson = descriptionJson;
+            asset.singlePrecision = singlePrecision;
+
+            // Topology and labels are needed to build the rig, so an asset created from bytes alone
+            // reads them off the payload instead of requiring the caller to parse them.
+            if (string.IsNullOrEmpty(asset.descriptionJson))
+            {
+                using (AnnyModel wide = AnnyModel.FromBytes(payload, null))
+                {
+                    asset.CacheDescription(wide);
+                }
+            }
+
+            return asset;
+        }
+
         public void CacheDescription(AnnyModel model)
         {
             descriptionJson = model.DescribeJson();
@@ -72,6 +106,13 @@ namespace Anny
 
         private byte[] PayloadBytes()
         {
+            // An in-memory payload is what tests and runtime downloads have: a TextAsset cannot be
+            // built from arbitrary bytes at runtime, so the bytes can be handed over directly.
+            if (payloadBytes != null && payloadBytes.Length > 0)
+            {
+                return payloadBytes;
+            }
+
             if (payload == null)
             {
                 throw new InvalidOperationException(name + " has no payload assigned");

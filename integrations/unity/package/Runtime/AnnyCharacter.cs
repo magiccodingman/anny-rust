@@ -88,15 +88,29 @@ namespace Anny
 
         public int Evaluations { get; private set; }
 
+        /// <summary>
+        /// A copy of the vertex array from the most recent evaluation, in Anny coordinates and
+        /// unexpanded: one triple per model vertex, whatever the mesh's corner expansion did. This
+        /// is what the mesh was built from, so a caller can compare the two.
+        /// </summary>
+        public float[] LastVertices()
+        {
+            return lastVertices;
+        }
+
         /// <summary>Wall-clock milliseconds spent in the most recent native evaluation.</summary>
         public double LastEvaluateMs { get; private set; }
 
         private AnnyOutputF32 lastOutput;
+        private float[] lastVertices;
         private MeshFilter filter;
 
         private void Awake()
         {
-            if (generateOnAwake)
+            // A character configured after it was added (pooling, instantiation, tests) has no model
+            // yet; that is a normal state, not an error, so Awake stays quiet. Calling Generate by
+            // hand with no model still reports the mistake.
+            if (generateOnAwake && modelAsset != null)
             {
                 Generate();
             }
@@ -185,6 +199,15 @@ namespace Anny
             CornerSource = built.CornerSource;
             GeneratedMesh.name = name + "-anny";
 
+            if (modelAsset.Description == null)
+            {
+                // A payload without a cached description is still usable: read it from the model.
+                using (AnnyModel wide = modelAsset.OpenWide())
+                {
+                    modelAsset.CacheDescription(wide);
+                }
+            }
+
             Rig = AnnySkeleton.Build(modelAsset.Description, lastOutput, transform);
             InstallRenderer();
 
@@ -192,6 +215,12 @@ namespace Anny
             {
                 Session = runtime.CreateSession(parameters);
             }
+
+            // Finish the job: a generated character carries the evaluation it was built from, so the
+            // mesh, the rig and the cached vertex array all agree before the first frame is drawn.
+            PushOutput(lastOutput);
+
+            WarnIfQualityDropsInfluences();
         }
 
         /// <summary>Parameters from the sliders on this component.</summary>
@@ -310,12 +339,58 @@ namespace Anny
         /// <summary>Updates the mesh and the bone hierarchy from an evaluation.</summary>
         public void PushOutput(IAnnyEvaluation evaluation)
         {
+            AnnyTensorF32 posed = evaluation.Tensor(AnnyOutputF32.Vertices);
+            lastVertices = posed.Data;
+
             if (mode == AnnyUpdateMode.Exact)
             {
                 AnnyMeshBuilder.UpdatePosedVertices(GeneratedMesh, evaluation, CornerSource, true);
             }
 
             AnnySkeleton.ApplyPose(Rig, evaluation);
+            Evaluations++;
+        }
+
+        /// <summary>
+        /// Unity's skinning uses at most <see cref="QualitySettings.skinWeights"/> bones per vertex,
+        /// whatever the mesh carries. When the active quality level would drop influences the model
+        /// assigns, the skinned result stops matching a native evaluation, and that is worth saying
+        /// out loud rather than discovering as centimetres of drift.
+        /// </summary>
+        private void WarnIfQualityDropsInfluences()
+        {
+            if (mode != AnnyUpdateMode.Skinned || Report == null)
+            {
+                return;
+            }
+
+            int allowed;
+            switch (QualitySettings.skinWeights)
+            {
+                case SkinWeights.OneBone:
+                    allowed = 1;
+                    break;
+                case SkinWeights.TwoBones:
+                    allowed = 2;
+                    break;
+                case SkinWeights.FourBones:
+                    allowed = 4;
+                    break;
+                default:
+                    allowed = int.MaxValue;
+                    break;
+            }
+
+            if (Report.MaxInfluencesPerVertex > allowed)
+            {
+                UnityEngine.Debug.LogWarning(
+                    name + ": the active quality level (\"" +
+                    QualitySettings.names[QualitySettings.GetQualityLevel()] +
+                    "\") allows " + allowed + " bone influences per vertex, but this model assigns " +
+                    Report.MaxInfluencesPerVertex + ". The skinned mesh will not match a native " +
+                    "evaluation; set QualitySettings.skinWeights to Unlimited, or use " +
+                    "AnnyUpdateMode.Exact.", this);
+            }
         }
 
         private void InstallRenderer()
