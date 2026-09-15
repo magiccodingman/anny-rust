@@ -1,0 +1,19 @@
+# Unity generates these inside the host project; only Assets, Packages and ProjectSettings
+# describe the project and belong in version control.
+project/Library/
+project/Temp/
+project/Obj/
+project/Logs/
+project/UserSettings/
+project/Build/
+project/Builds/
+project/*.csproj
+project/*.sln
+project/*.user
+project/*.unityproj
+project/*.pidb
+project/*.booproj
+project/*.svd
+
+# Native build output staged by tools/build-native.sh is intentionally committed under
+# Plugins/, so it is not ignored here.

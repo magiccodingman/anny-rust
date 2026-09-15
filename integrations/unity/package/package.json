@@ -1,0 +1,22 @@
+{
+  "name": "com.magiccodingman.anny",
+  "version": "0.1.0",
+  "displayName": "Anny Character Runtime",
+  "description": "Native Anny-Rust character runtime for Unity: load or build an Anny model, drive it with reusable pose sessions, build Mesh/SkinnedMeshRenderer/skeleton/blendshape data, and bake results into normal Unity assets. Portable Linux x86_64 native library is included; other platforms build from the same C ABI.",
+  "unity": "6000.0",
+  "keywords": [
+    "anny",
+    "character",
+    "skinning",
+    "rig",
+    "morph",
+    "native"
+  ],
+  "author": {
+    "name": "MagicCodingMan",
+    "url": "https://github.com/magiccodingman/anny-rust"
+  },
+  "license": "Apache-2.0",
+  "dependencies": {},
+  "samples": []
+}
