@@ -13,6 +13,9 @@ Local validation against the pinned source, recorded September 13, 2026.
   but panics when a thread is created — the parallel helpers now take their sequential path on wasm32.
 - Full-model Python-reference parity: **23/23 passed**, absolute tolerance 1e-6, relative tolerance 0. Integer arrays and labels are exact.
 - Prepared Safetensors model -> native reload -> reference comparison: passed.
+- The parallel BVH build produces the same tree as the sequential one, node for node
+  (`mesh::build_tests::the_parallel_build_produces_the_sequential_tree`), and every real-data digest
+  (`collision_native`, `prepared_payload`, `native_import`) is unchanged by it.
 - Written payloads are byte-identical across processes for both writers (`tests/payload_determinism.rs`, which spawns two child processes because a per-process hash seed cannot be observed from inside one). Only the header changed: a pre-fix and a post-fix payload carry the same metadata, have the same header length, and all 14 tensors compare equal — and the reference Python `safetensors` reader opens the rewritten file.
 - Real C executables calling ABI 1 generated 13,718 vertices / 27,420 faces from imported assets, and pose sessions matched `evaluate` exactly (f64 and f32), including after the model handle was freed. The .NET example asserts the same for both managed session wrappers.
 - Native two-iteration fitting smoke completed on real default-mesh data; resulting mean vertex error 0.0082489114 m. This is a functional smoke, not optimizer trajectory parity or a convergence benchmark.

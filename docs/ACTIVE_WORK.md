@@ -47,7 +47,7 @@ The following remain the major successor workstream:
 4. Complete browser character editor.
 5. Serious profiling-driven performance optimization.
 
-Progress against that list is recorded in `docs/PERFORMANCE.md`: the prepare/reload, tensor-decode, precision-conversion and collision hot paths are done (9.6x, 2.1x, 1.82x and 4.5x respectively, all with byte-identical output), the pose session is reachable from Rust, the CLI, C, C#, the WASM bindings and the browser, and the serialized payload is byte-reproducible across processes. GPU/WebGPU, SIMD and the Unity/browser-editor workstreams remain.
+Progress against that list is recorded in `docs/PERFORMANCE.md`: the prepare/reload, tensor-decode, precision-conversion and collision hot paths are done (9.6×, 2.1×, 1.82×, and 2.3× on the BVH build that dominated the remaining collision frame); the pose session is reachable from Rust, the CLI, C, C#, the WASM bindings and the browser; and the serialized payload is byte-reproducible across processes. GPU/WebGPU, SIMD and the browser-editor/Unity work remain.
 
 Optional future work also includes CUDA/ROCm-specialized backends and qualification with user-supplied licensed SMPL/SMPL-X/AMASS data.
 

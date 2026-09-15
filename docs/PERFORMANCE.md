@@ -298,10 +298,20 @@ measured: module construction 15.1 ms, search 47.6 ms. Neither was a validation 
   and traversal order. `derive collision` 20.522 → **14.427 ms** (15.111 median), digest still
   unchanged. Collision is now 64.632 → **14.427 ms** across the session.
 - What is left is ~7.6 ms of search across 1.07M candidate pairs plus a BVH build of roughly the same
-  size. Parallelising the build is not in the same category as the two changes above: subtree
-  construction would allocate nodes in a different order, which the `sort_unstable()` on the candidate
-  list happens to tolerate today but nothing in the code guarantees, so it needs the same deliberate
-  decision the exact-AABB rewrite needed — and that one lost parity.
+  size. The build is parallel now, and it is the one change where the index layout had to be preserved
+  *by construction* rather than hoped for: `build_subtree` returns a subtree whose root is first with
+  every index relative to that vector, and a parent splices it as parent + left + right and rebases
+  the children — exactly the pre-order the sequential builder pushed, so the parallel build produces
+  the same node vector with the same indices. Measured on one `SelfInterpenetrationModule::forward`
+  over the real model: BVH build 6.94 → **3.03 ms**, that forward 9.18 → **5.79 ms** (build share
+  52%), collision digest unchanged.
+- **The structural test caught a real defect here, and the digests could not have.** A threaded right
+  subtree was built with `base` instead of `base + mid` for one revision: right-hand subtrees carried
+  the wrong face ranges while their links stayed correct. Every digest test still passed, because a
+  digest computed from the traversal only reflects the ranges the traversal was handed, so the timings
+  taken during that revision were not measuring the same work and were withdrawn. Node identity is a
+  separate contract from behavioural equivalence; `mesh::build_tests::
+  the_parallel_build_produces_the_sequential_tree` is what polices it.
 
 **5. `derive measure` and `derive keypoints` construct their module per request**, which was the
 dominant cost until the eager-`format!` fix above (7.9 ms and 30.6 ms of construction respectively).
