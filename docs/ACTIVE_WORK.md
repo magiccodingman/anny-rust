@@ -58,7 +58,7 @@ If further agentic work is performed in a transient browser environment, keep us
 ### Unity is integrated, validated in the editor, and now in real players, with editor controls and physics
 
 `integrations/unity/` holds UPM package `com.magiccodingman.anny` (native plugin, runtime, editor
-tooling, tests) plus the host project the tests run in. EditMode 26/26 and PlayMode 8/8 pass against
+tooling, tests) plus the host project the tests run in. EditMode 26/26 and PlayMode 10/10 pass against
 the real editor and a real model; see VALIDATION.md for the numbers and the two defects the runs found.
 
 Both Linux players build and run (`tools/build-players.sh`). Mono and IL2CPP generate the same
@@ -74,12 +74,18 @@ and `AnnyBakeWindow` exposes the baker. EditMode is 26/26 with those covered, an
 mutation-checked: dropping the preset's slider copy fails the round trip and removing the inspector's
 registration fails the inspector test.
 
+Animation baking is done: `AnnyClipBaker` records native motion into ordinary `AnimationClip`s through
+both the evaluation path and the pose session, and sampling a baked clip reproduces every bone's world
+position (`worst = 3e-07 m` for the pose session, `0 m` for the phenotype path, over 104 bones).
+
 Physics is done too: `AnnyMeshCollider` drives a `MeshCollider` from the generated mesh, re-cooking it
 on evaluation in Exact mode. A raycast against the cooked collider agrees with ray/triangle
 intersections computed from the mesh at `delta = 0` (f32 print precision) against a 1e-3 m tolerance.
 
 Still open, in dependency order:
 
-1. WebGL player build, which needs the wasm bindings rather than the cdylib the other two use.
-2. Animation/avatar retargeting (Humanoid mapping and clip playback on the generated rig).
+1. WebGL player build. Emscripten 3.1.38 is now installed (the version Unity 6000.x uses for WebGL),
+   so the wasm path can be attempted rather than deferred: `anny-capi` as an Emscripten side module plus
+   `.jslib` glue, since the other two players link the cdylib directly.
+2. Humanoid/avatar mapping (`AvatarBuilder`) on top of the baked-clip work.
 3. GPU/WebGPU and the remaining CPU work.

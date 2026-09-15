@@ -181,10 +181,17 @@
     "warp": "1.9.1"
   },
   "rtol": 0,
+  "unity_animation": {
+    "bones": 104,
+    "frame_rate": 30.0,
+    "note": "AnimationClip baked from native evaluations via AnnyClipBaker; sampling the clip with AnimationClip.SampleAnimation reproduces every bone's world position",
+    "tolerance_m": 0.001,
+    "worst_phenotype_sample_m": 0.0,
+    "worst_pose_sample_m": 3e-07
+  },
   "unity_editmode": {
-    "compiler": "Unity 6000.6.0f1 Roslyn, zero errors",
     "failed": 0,
-    "note": "Includes the preset round-trip (applying a captured preset reproduces the geometry to zero), preset asset serialization, edit-mode generation, inspector registration and bake-window option mapping.",
+    "name": "Unity EditMode suites",
     "passed": 26,
     "total": 26
   },
@@ -239,9 +246,9 @@
   "unity_playmode": {
     "failed": 0,
     "name": "Unity PlayMode suites",
-    "notes": "includes three physics tests: collider bounds match the mesh, a raycast agrees with ray/triangle intersections computed from the mesh (delta=0 at f32 print precision), and Exact mode re-cooks the collider after a pose change (mutation-checked: dropping the re-cook condition fails that test alone)",
-    "passed": 8,
-    "total": 8
+    "notes": "includes three physics tests and two animation tests",
+    "passed": 10,
+    "total": 10
   },
   "unity_tested": true,
   "upstream_revision": "81ca83e202273b306205c1cc15f33734be31e48c",

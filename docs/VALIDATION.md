@@ -174,3 +174,14 @@ bones, while in Exact mode the collider follows the evaluated surface and is re-
 character evaluates (`AnnyCharacter` edits the mesh in place, so the evaluation counter is the staleness
 signal; comparing mesh references would never fire). Mutation-checked: removing the re-cook condition
 fails `ExactModeRefreshesTheColliderWhenThePoseChanges` and nothing else (7/8).
+
+### Unity animation baking
+
+`AnnyClipBaker` bakes native motion into ordinary `AnimationClip`s (local TRS curves, paths relative to
+the rig root), through both the full evaluation path and the optimized pose session. The tests bake a
+clip from real evaluations and then sample it, comparing every bone's world position against the same
+native pose — a clip that exists, or that has the right length, would prove nothing. Measured over 104
+bones: pose-sequence bake `worst = 3e-07 m`, phenotype bake `worst = 0 m`, both against a 1e-3 m
+tolerance. One intermediate failure was a wrong expectation in the test, not a defect: three keyframes
+one frame apart span two frames, so the clip is `(keys - 1) / frameRate` seconds long, which is what the
+bakery already returned.
