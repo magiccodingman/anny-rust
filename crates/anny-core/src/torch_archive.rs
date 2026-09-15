@@ -798,7 +798,7 @@ pub fn convert(bytes: &[u8]) -> Result<Vec<u8>> {
             ))
         })
         .collect::<Result<Vec<_>>>()?;
-    Ok(safetensors::serialize(views, &Some(metadata))?)
+    crate::tensor::sorted_metadata_header(safetensors::serialize(views, &Some(metadata))?)
 }
 pub fn load(path: impl AsRef<Path>) -> Result<Archive> {
     ensure(

@@ -10,7 +10,7 @@ use crate::{
     Error, Result, Tensor,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Measurements {
@@ -269,7 +269,12 @@ pub fn triangle_intersects_sat(a: [Vec3; 3], b: [Vec3; 3]) -> bool {
 /// Selection among multiple intersections is deterministic by face id, not GPU order.
 pub struct SelfInterpenetrationModule {
     faces: Tensor,
-    masks: Vec<BTreeSet<String>>,
+    /// Per-face bone-label ids, sorted and deduplicated.
+    ///
+    /// These used to be `BTreeSet<String>`, which cost ~82k `String` clones to build and a string
+    /// comparison walk on every candidate face pair. Label ids are interned once instead; the
+    /// disjointness test is now an integer merge walk.
+    masks: Vec<Vec<u32>>,
     n: usize,
 }
 impl SelfInterpenetrationModule {
@@ -308,25 +313,40 @@ impl SelfInterpenetrationModule {
                 }
             })
             .collect();
+        // Intern the label vocabulary once per module: masks are compared against each other far more
+        // often than they are built.
+        let mut vocabulary: HashMap<&str, u32> = HashMap::new();
+        let mut interned = Vec::with_capacity(labels.len());
+        for s in &labels {
+            let next = vocabulary.len() as u32;
+            interned.push(*vocabulary.entry(s.as_str()).or_insert(next));
+        }
         let weights = model.data.get("vertex_bone_weights")?;
         let ids = model.data.get("vertex_bone_indices")?;
         let k = weights.shape[1];
         let n = model.data.vertex_count();
-        let mut vm = vec![BTreeSet::new(); n];
+        let mut vm: Vec<Vec<u32>> = vec![Vec::new(); n];
         for v in 0..n {
+            let mask = &mut vm[v];
             for s in 0..k {
                 if weights.data[v * k + s] > 0. {
-                    vm[v].insert(labels[ids.data[v * k + s] as usize].clone());
+                    mask.push(interned[ids.data[v * k + s] as usize]);
                 }
             }
+            mask.sort_unstable();
+            mask.dedup();
         }
         let masks = faces
             .data
             .chunks_exact(3)
             .map(|f| {
-                f.iter()
-                    .flat_map(|&v| vm[v as usize].iter().cloned())
-                    .collect()
+                let mut mask: Vec<u32> = f
+                    .iter()
+                    .flat_map(|&v| vm[v as usize].iter().copied())
+                    .collect();
+                mask.sort_unstable();
+                mask.dedup();
+                mask
             })
             .collect();
         Ok(Self { faces, masks, n })
@@ -342,39 +362,124 @@ impl SelfInterpenetrationModule {
             data: vec![-1.; vertices.shape[0] * f],
             kind: Kind::Index,
         };
+        // Broad phase: one BVH query per face, with the traversal buffers reused across all 27,420
+        // queries and across batches.
+        //
+        // The candidate set is deliberately kept exactly as it was: the BVH returns faces from leaf
+        // nodes whose AABB overlaps the query, so it is a superset of true AABB overlaps. An exact
+        // AABB sweep was written and measured faster (12.6 ms vs 22.1 ms of search) but produced 728
+        // partners instead of 940, because `triangle_intersects_sat` skips edge-cross axes with
+        // `norm_squared() <= 1e-6` and so reports near-degenerate pairs as intersecting even when the
+        // two AABBs are disjoint. Those pairs are reachable only through the leaf-union superset.
+        // Upstream's BVH query has the same behaviour, so narrowing the candidate set would trade
+        // parity for speed. Reusing the buffers is free of that trade.
+        let threads = crate::parallel::worker_threads(f);
         for (bi, row) in vertices.data.chunks_exact(self.n * 3).enumerate() {
             let v = Tensor::new(vec![self.n, 3], row.to_vec())?;
             let bvh = MeshBvh::new(&v, &self.faces)?;
-            for (i, face) in self.faces.data.chunks_exact(3).enumerate() {
-                let tri = std::array::from_fn(|s| {
-                    vec3(&row[face[s] as usize * 3..face[s] as usize * 3 + 3])
-                });
-                let mut lo = tri[0];
-                let mut hi = tri[0];
-                for v in &tri[1..] {
-                    for k in 0..3 {
-                        lo[k] = lo[k].min(v[k]);
-                        hi[k] = hi[k].max(v[k]);
-                    }
+            let row_out = &mut out.data[bi * f..(bi + 1) * f];
+            // Each face searches with its own traversal buffers and writes only its own slot, so the
+            // answer and the array are exactly what the sequential loop produced: only the wall clock
+            // changes.
+            if threads == 1 || f < PARALLEL_COLLISION_FACES {
+                let mut stack = Vec::new();
+                let mut candidates = Vec::new();
+                for (i, value) in row_out.iter_mut().enumerate() {
+                    *value = self.first_collision(&bvh, row, i, &mut stack, &mut candidates);
                 }
-                let mut candidates = bvh.overlapping_faces(lo, hi);
-                candidates.sort_unstable();
-                for j in candidates {
-                    if i == j || !self.masks[i].is_disjoint(&self.masks[j]) {
-                        continue;
-                    }
-                    let ids = bvh.triangle_indices(j);
-                    let other = ids.map(|v| vec3(&row[v * 3..v * 3 + 3]));
-                    if triangle_intersects_sat(tri, other) {
-                        out.data[bi * f + i] = j as f64;
-                        break;
-                    }
-                }
+                continue;
             }
+            let per = f.div_ceil(threads);
+            let bvh = &bvh;
+            std::thread::scope(|scope| {
+                for (chunk, slot) in row_out.chunks_mut(per).enumerate() {
+                    let first = chunk * per;
+                    scope.spawn(move || {
+                        let mut stack = Vec::new();
+                        let mut candidates = Vec::new();
+                        for (offset, value) in slot.iter_mut().enumerate() {
+                            *value = self.first_collision(
+                                bvh,
+                                row,
+                                first + offset,
+                                &mut stack,
+                                &mut candidates,
+                            );
+                        }
+                    });
+                }
+            });
         }
         Ok(out)
     }
+
+    /// The index of the first face that intersects face `i`, or `-1.0`.
+    ///
+    /// The traversal buffers belong to the caller so that a search reuses them across faces instead of
+    /// allocating per query, which is what makes the parallel path above cheap to fan out.
+    fn first_collision(
+        &self,
+        bvh: &MeshBvh,
+        row: &[f64],
+        i: usize,
+        stack: &mut Vec<usize>,
+        candidates: &mut Vec<usize>,
+    ) -> f64 {
+        let tri = self.face_triangle(row, i);
+        let mut lo = tri[0];
+        let mut hi = tri[0];
+        for v in &tri[1..] {
+            for k in 0..3 {
+                lo[k] = lo[k].min(v[k]);
+                hi[k] = hi[k].max(v[k]);
+            }
+        }
+        bvh.overlapping_faces_into(lo, hi, stack, candidates);
+        candidates.sort_unstable();
+        for &j in candidates.iter() {
+            if i == j || label_masks_intersect(&self.masks[i], &self.masks[j]) {
+                continue;
+            }
+            let other = self.face_triangle(row, j);
+            if triangle_intersects_sat(tri, other) {
+                return j as f64;
+            }
+        }
+        -1.
+    }
+
+    /// The three vertices of face `i` from a batch row.
+    fn face_triangle(&self, row: &[f64], i: usize) -> [Vec3; 3] {
+        std::array::from_fn(|s| {
+            let v = self.faces.data[i * 3 + s] as usize * 3;
+            vec3(&row[v..v + 3])
+        })
+    }
 }
+/// Faces below which the collision search stays on the calling thread: a handful of faces cannot pay
+/// for the fan-out, and the per-face cost is what decides the split above this threshold.
+const PARALLEL_COLLISION_FACES: usize = 1 << 10;
+
+/// Whether two sorted, deduplicated label-id masks share at least one label.
+///
+/// This is the inner test of the collision search and runs once per candidate face pair, so it is a
+/// merge walk over integers rather than a set comparison over strings. The predicate is stated
+/// positively on purpose: the previous `BTreeSet<String>::is_disjoint` call was used negated, and a
+/// mask test that returns the opposite of its name is exactly how a silent inversion happens.
+fn label_masks_intersect(a: &[u32], b: &[u32]) -> bool {
+    let (mut i, mut j) = (0, 0);
+    while i < a.len() && j < b.len() {
+        if a[i] < b[j] {
+            i += 1;
+        } else if a[i] > b[j] {
+            j += 1;
+        } else {
+            return true;
+        }
+    }
+    false
+}
+
 /// Mesh cleanup helpers use graph connectivity, not a third-party rendering engine.
 pub fn symmetric_vertex_indices(
     vertices: &Tensor,

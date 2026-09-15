@@ -37,6 +37,17 @@ public sealed class AnnyModel : IDisposable
         }
     }
 
+    /// <summary>Copies static data once into an independent f32 native runtime.</summary>
+    public AnnySinglePrecisionModel ToSinglePrecision()
+    {
+        lock (gate)
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            Check(NativeF32.Convert(model, out var pointer));
+            return new AnnySinglePrecisionModel(pointer);
+        }
+    }
+
     public AnnyMesh Generate(string parametersJson = "{}")
     {
         lock (gate)
@@ -70,6 +81,21 @@ public sealed class AnnyModel : IDisposable
             var result = new byte[count];
             if (count != 0) Marshal.Copy(Native.BytesData(bytes), result, 0, count);
             return result;
+        }
+    }
+
+    /// <summary>
+    /// Starts a reusable pose session: the coefficient and rest-model halves are evaluated once, so
+    /// every <see cref="AnnyPoseSession.Update"/> pays only for the pose. The session keeps its own
+    /// native reference to the model, so disposing this model first is safe.
+    /// </summary>
+    public AnnyPoseSession CreateSession(string parametersJson = "{}")
+    {
+        lock (gate)
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            Check(Native.SessionNew(model, parametersJson, out var pointer));
+            return new AnnyPoseSession(this, new SessionHandle(pointer));
         }
     }
 
@@ -122,7 +148,7 @@ public sealed class AnnyModel : IDisposable
         }
     }
 
-    private static double[] Copy(TensorView view)
+    internal static double[] Copy(TensorView view)
     {
         var count = checked((int)view.Length);
         var result = new double[count];
@@ -140,10 +166,71 @@ public sealed class AnnyModel : IDisposable
         }
     }
 
-    private static void Check(int status)
+    internal static void Check(int status)
     {
         if (status != 0)
             throw new InvalidOperationException(Marshal.PtrToStringUTF8(Native.LastError()) ?? "Native Anny error.");
+    }
+}
+
+/// <summary>
+/// Owns one native pose session over a model. Not thread safe: serialise calls yourself. It holds the
+/// managed model, so the model cannot be collected (and the native model cannot be freed) while the
+/// session is alive.
+/// </summary>
+public sealed class AnnyPoseSession : IDisposable
+{
+    private readonly AnnyModel owner;
+    private readonly SessionHandle session;
+    private readonly object gate = new();
+    private bool disposed;
+
+    internal AnnyPoseSession(AnnyModel owner, SessionHandle session)
+    {
+        this.owner = owner;
+        this.session = session;
+    }
+
+    /// <summary>Re-poses the session. Arrays copied before this call remain valid.</summary>
+    public void Update(string poseJson = "{}")
+    {
+        lock (gate)
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            AnnyModel.Check(Native.SessionUpdate(session, poseJson));
+        }
+    }
+
+    /// <summary>Copies one array of the most recent pose (the rest model before any update).</summary>
+    public double[] Tensor(string name)
+    {
+        lock (gate)
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            AnnyModel.Check(Native.SessionTensor(session, name, out var view));
+            return AnnyModel.Copy(view);
+        }
+    }
+
+    /// <summary>Copies the coefficients the session was created with.</summary>
+    public double[] Coefficients()
+    {
+        lock (gate)
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            AnnyModel.Check(Native.SessionCoefficients(session, out var view));
+            return AnnyModel.Copy(view);
+        }
+    }
+
+    public void Dispose()
+    {
+        lock (gate)
+        {
+            if (disposed) return;
+            disposed = true;
+            session.Dispose();
+        }
     }
 }
 
@@ -168,6 +255,13 @@ internal sealed class OutputHandle : SafeHandle
     internal OutputHandle(IntPtr pointer) : base(IntPtr.Zero, true) => SetHandle(pointer);
     public override bool IsInvalid => handle == IntPtr.Zero;
     protected override bool ReleaseHandle() { Native.FreeOutput(handle); return true; }
+}
+
+internal sealed class SessionHandle : SafeHandle
+{
+    internal SessionHandle(IntPtr pointer) : base(IntPtr.Zero, true) => SetHandle(pointer);
+    public override bool IsInvalid => handle == IntPtr.Zero;
+    protected override bool ReleaseHandle() { Native.FreeSession(handle); return true; }
 }
 
 internal sealed class BytesHandle : SafeHandle
@@ -215,6 +309,16 @@ internal static class Native
     internal static extern void FreeModel(IntPtr model);
     [DllImport(Library, EntryPoint = "anny_output_free", CallingConvention = CallingConvention.Cdecl)]
     internal static extern void FreeOutput(IntPtr output);
+    [DllImport(Library, EntryPoint = "anny_session_new", CallingConvention = CallingConvention.Cdecl)]
+    internal static extern int SessionNew(ModelHandle model, [MarshalAs(UnmanagedType.LPUTF8Str)] string parameters, out IntPtr session);
+    [DllImport(Library, EntryPoint = "anny_session_update", CallingConvention = CallingConvention.Cdecl)]
+    internal static extern int SessionUpdate(SessionHandle session, [MarshalAs(UnmanagedType.LPUTF8Str)] string pose);
+    [DllImport(Library, EntryPoint = "anny_session_tensor", CallingConvention = CallingConvention.Cdecl)]
+    internal static extern int SessionTensor(SessionHandle session, [MarshalAs(UnmanagedType.LPUTF8Str)] string name, out TensorView view);
+    [DllImport(Library, EntryPoint = "anny_session_coefficients", CallingConvention = CallingConvention.Cdecl)]
+    internal static extern int SessionCoefficients(SessionHandle session, out TensorView view);
+    [DllImport(Library, EntryPoint = "anny_session_free", CallingConvention = CallingConvention.Cdecl)]
+    internal static extern void FreeSession(IntPtr session);
     [DllImport(Library, EntryPoint = "anny_string_free", CallingConvention = CallingConvention.Cdecl)]
     internal static extern void FreeString(IntPtr text);
 }

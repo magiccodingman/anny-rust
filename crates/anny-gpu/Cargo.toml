@@ -1,0 +1,29 @@
+[package]
+name = "anny-gpu"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "GPU (wgpu/WebGPU) evaluation kernels for Anny, with CPU-parity checks"
+
+[dependencies]
+anny-core = { workspace = true }
+thiserror = { workspace = true }
+
+# The two backends are mutually exclusive by target: Vulkan drives the native
+# adapters, while the browser reaches WebGPU through wgpu's `webgpu` backend.
+# Only `wgsl` and `std` are shared.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+pollster = "1.0.1"
+wgpu = { version = "26", default-features = false, features = ["vulkan", "wgsl", "std"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wgpu = { version = "26", default-features = false, features = ["webgpu", "wgsl", "std"] }
+js-sys = { workspace = true }
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = "0.4.43"
+
+[dev-dependencies]
+# The parity test drives coefficients through the shipped phenotype path, whose parameters are JSON.
+serde_json = { workspace = true }

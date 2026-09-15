@@ -43,7 +43,36 @@ int main(int argc, char **argv) {
     check(anny_output_tensor(output, "vertices", &vertices));
     require(vertices.shape[1] > 0, "prepared reload returned no vertices");
     anny_output_free(output);
+    /* Pose session: the pose-only update path must agree with evaluate bit for bit. */
+    const char *pose =
+        "{\"root\":[[1,0,0,0.2],[0,0.9396926,0.3420201,-0.15],[0,-0.3420201,0.9396926,0.05],[0,0,0,1]]}";
+    char parameters[512];
+    snprintf(parameters, sizeof parameters, "{\"pose_parameters\":%s}", pose);
+    AnnyOutput *evaluated = NULL;
+    AnnySession *session = NULL;
+    check(anny_model_evaluate(reloaded, parameters, &evaluated));
+    check(anny_session_new(reloaded, parameters, &session));
+    check(anny_session_update(session, pose));
+    AnnyTensorView from_session, from_evaluate;
+    check(anny_session_tensor(session, "vertices", &from_session));
+    check(anny_output_tensor(evaluated, "vertices", &from_evaluate));
+    require(from_session.len == from_evaluate.len && from_session.len > 0, "session/evaluate length mismatch");
+    require(memcmp(from_session.data, from_evaluate.data, from_session.len * sizeof(double)) == 0,
+        "session output differs from evaluate");
+    double *snapshot = malloc(from_session.len * sizeof(double));
+    require(snapshot != NULL, "out of memory");
+    memcpy(snapshot, from_session.data, from_session.len * sizeof(double));
+    size_t snapshot_len = from_session.len;
+    anny_output_free(evaluated);
+    /* The session keeps its own reference to the model, so the handle may be freed first. */
     anny_model_free(reloaded);
-    puts("C query, rigged GLB, transform, pose transfer, owned bytes and reload: PASS");
+    check(anny_session_update(session, pose));
+    check(anny_session_tensor(session, "vertices", &from_session));
+    require(from_session.len == snapshot_len
+        && memcmp(snapshot, from_session.data, snapshot_len * sizeof(double)) == 0,
+        "session lost its model or changed its output");
+    free(snapshot);
+    anny_session_free(session);
+    puts("C query, rigged GLB, transform, pose transfer, owned bytes, reload and pose session: PASS");
     return 0;
 }

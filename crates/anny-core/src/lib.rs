@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 pub mod assets;
 pub mod config;
+pub mod differentiation;
 pub mod distribution;
 pub mod import;
 pub mod inverter;
@@ -10,6 +11,7 @@ pub mod math;
 pub mod mesh;
 pub mod mesh_io;
 pub mod model;
+mod parallel;
 pub mod scene;
 pub mod smpl;
 pub mod tensor;
@@ -17,7 +19,7 @@ pub mod tools;
 pub mod torch_archive;
 
 pub use config::{AnnyConfig, PoseParameterization, SkinningMethod};
-pub use model::{Anny, ModelData, ModelOutput, Parameters};
+pub use model::{Anny, ModelData, ModelOutput, Parameters, PoseSession};
 pub use tensor::Tensor;
 pub const UPSTREAM_REVISION: &str = "81ca83e202273b306205c1cc15f33734be31e48c";
 pub const DATA_VERSION: usize = 11;
@@ -49,3 +51,15 @@ pub mod fitting;
 pub mod precompute;
 
 pub mod operations;
+
+pub mod typed;
+pub use typed::{AnnyF32, ModelOutputF32, PoseSessionF32, TensorF32};
+
+pub mod motion;
+pub mod numpy;
+
+pub mod prior;
+
+pub mod refinement;
+
+pub mod gltf_asset;

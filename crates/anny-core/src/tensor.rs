@@ -82,8 +82,37 @@ impl Tensor {
         }
         Ok(())
     }
+    /// Check that this tensor has exactly `shape`, requiring an O(1) structural check only.
+    ///
+    /// This is deliberately *not* a full [`Tensor::validate`]: validation includes a finiteness scan
+    /// over every element, and `expect_shape` sits on the evaluation hot path for tensors that can be
+    /// hundreds of megabytes (the default model's `blendshapes` is 205 MB). Re-scanning that on every
+    /// call cost ~9 ms, which was 93% of the fixed per-call cost of `forward`, and it re-derives a
+    /// property the tensor already had when it was built: finiteness is enforced once, at
+    /// construction (`Tensor::new`, `from_nested`, `from_bytes`, `checked_indices`). Debug builds
+    /// still run the full scan so a tensor whose public `data` was mutated into a non-finite state is
+    /// caught by the test suite.
     pub fn expect_shape(&self, shape: &[usize], name: &str) -> Result<()> {
+        #[cfg(debug_assertions)]
         self.validate()?;
+        self.checked_shape(shape, name)
+    }
+    /// The O(1) half of [`Tensor::expect_shape`]: rank/product/entry-count consistency plus the
+    /// expected shape.
+    pub fn checked_shape(&self, shape: &[usize], name: &str) -> Result<()> {
+        let n = self
+            .shape
+            .iter()
+            .try_fold(1usize, |a, &b| a.checked_mul(b))
+            .ok_or_else(|| Error::Invalid("tensor shape overflow".into()))?;
+        ensure(
+            n == self.data.len(),
+            format!(
+                "shape {:?} needs {n} entries, got {}",
+                self.shape,
+                self.data.len()
+            ),
+        )?;
         ensure(
             self.shape == shape,
             format!("{name}: expected {shape:?}, got {:?}", self.shape),
@@ -91,16 +120,19 @@ impl Tensor {
     }
     pub fn checked_indices(&self, bound: usize, name: &str) -> Result<Vec<usize>> {
         self.validate()?;
-        self.data
-            .iter()
-            .map(|&x| {
-                ensure(
-                    x >= 0. && x.fract() == 0. && x < bound as f64,
-                    format!("{name}: index {x} outside [0,{bound})"),
-                )?;
-                Ok(x as usize)
-            })
-            .collect()
+        // The failure message is built only when the check fails. `ensure(cond, format!(..))` builds
+        // its message eagerly, and this loop runs once per element over mesh-size arrays: ~82k
+        // allocations per call on the default model, which was 7.9 ms of an 8.5 ms `derive measure`.
+        let mut out = Vec::with_capacity(self.data.len());
+        for &x in &self.data {
+            if !(x >= 0. && x.fract() == 0. && x < bound as f64) {
+                return Err(Error::Invalid(format!(
+                    "{name}: index {x} outside [0,{bound})"
+                )));
+            }
+            out.push(x as usize);
+        }
+        Ok(out)
     }
     pub fn select(&self, axis: usize, indices: &[usize]) -> Result<Self> {
         ensure(
@@ -115,11 +147,39 @@ impl Tensor {
         let outer: usize = self.shape[..axis].iter().product();
         let mut shape = self.shape.clone();
         shape[axis] = indices.len();
-        let mut data = Vec::with_capacity(outer * indices.len() * inner);
-        for a in 0..outer {
-            for &i in indices {
-                let start = (a * self.shape[axis] + i) * inner;
-                data.extend_from_slice(&self.data[start..start + inner]);
+        let row = indices.len() * inner;
+        let mut data = vec![0.; outer * row];
+        // Rows along the leading axes are independent, so a big selection is spread over the cores.
+        // Each row lands in the same place the sequential loop would have put it, from the same source
+        // elements, which keeps the result bit-identical. Small selections stay sequential: the
+        // threads cost more than the copy.
+        let threads = crate::parallel::worker_threads(outer);
+        if threads > 1 && outer * row >= 1 << 20 {
+            let width = self.shape[axis];
+            let per = outer.div_ceil(threads);
+            std::thread::scope(|scope| {
+                for (chunk_id, chunk) in data.chunks_mut(per * row).enumerate() {
+                    let first = chunk_id * per;
+                    let source = &self.data;
+                    scope.spawn(move || {
+                        for (b, dst) in chunk.chunks_mut(row).enumerate() {
+                            let base = (first + b) * width * inner;
+                            for (j, &i) in indices.iter().enumerate() {
+                                let start = base + i * inner;
+                                dst[j * inner..(j + 1) * inner]
+                                    .copy_from_slice(&source[start..start + inner]);
+                            }
+                        }
+                    });
+                }
+            });
+        } else {
+            for a in 0..outer {
+                for (j, &i) in indices.iter().enumerate() {
+                    let start = (a * self.shape[axis] + i) * inner;
+                    data[a * row + j * inner..a * row + (j + 1) * inner]
+                        .copy_from_slice(&self.data[start..start + inner]);
+                }
             }
         }
         Ok(Self {
@@ -184,6 +244,53 @@ impl Tensor {
     }
 }
 
+/// Re-emit a serialized archive's header with its keys in sorted order.
+///
+/// `safetensors` writes `__metadata__` straight out of a `HashMap`, whose iteration order `std` seeds
+/// randomly per process, so the same archive serialized in two processes did not match byte for byte.
+/// Sorting the header makes every payload the crate writes reproducible; the tensor region is copied
+/// verbatim, so no offset, dtype or value changes.
+pub(crate) fn sorted_metadata_header(bytes: Vec<u8>) -> Result<Vec<u8>> {
+    ensure(
+        bytes.len() >= 8,
+        "serialized archive is shorter than its header",
+    )?;
+    let header_len = u64::from_le_bytes(bytes[..8].try_into().expect("8 bytes")) as usize;
+    ensure(
+        bytes.len() >= 8 + header_len,
+        "serialized archive header is truncated",
+    )?;
+    let header: Value = serde_json::from_slice(&bytes[8..8 + header_len])?;
+    ensure(header.is_object(), "archive header is not an object")?;
+    // Every object on the way down, not just the top level: `__metadata__` is itself a map whose
+    // order the crate took from a `HashMap`.
+    let mut sorted = serde_json::to_vec(&canonical(&header))?;
+    // The format requires the JSON header to be a multiple of 8 bytes, space padded.
+    sorted.resize(sorted.len().div_ceil(8) * 8, b' ');
+    let mut out = Vec::with_capacity(sorted.len() + bytes.len() - header_len);
+    out.extend_from_slice(&(sorted.len() as u64).to_le_bytes());
+    out.extend_from_slice(&sorted);
+    out.extend_from_slice(&bytes[8 + header_len..]);
+    Ok(out)
+}
+
+/// `Value` with every object's keys in sorted order, at every depth.
+///
+/// Entries are collected into a sorted `Vec` before rebuilding the map so the result does not
+/// depend on whether `serde_json` preserves insertion order.
+pub(crate) fn canonical(value: &Value) -> Value {
+    match value {
+        Value::Object(map) => {
+            let mut entries: Vec<(String, Value)> =
+                map.iter().map(|(k, v)| (k.clone(), canonical(v))).collect();
+            entries.sort_by(|left, right| left.0.cmp(&right.0));
+            Value::Object(entries.into_iter().collect())
+        }
+        Value::Array(items) => Value::Array(items.iter().map(canonical).collect()),
+        other => other.clone(),
+    }
+}
+
 /// Also handles the one-time converter's nested state-dictionary envelope.
 #[derive(Clone, Debug, Default)]
 pub struct Archive {
@@ -212,10 +319,32 @@ impl Archive {
         Self::from_bytes(&std::fs::read(path)?)
     }
     pub fn to_bytes(&self) -> Result<Vec<u8>> {
+        self.serialize(false)
+    }
+    /// Serialize floating attributes as f32; integers retain their integer dtype.
+    /// This affects storage only. Use AnnyF32 for single-precision evaluation.
+    pub fn to_bytes_f32(&self) -> Result<Vec<u8>> {
+        self.serialize(true)
+    }
+    pub fn save_f32(&self, path: impl AsRef<std::path::Path>) -> Result<()> {
+        std::fs::write(path, self.to_bytes_f32()?)?;
+        Ok(())
+    }
+    fn serialize(&self, single: bool) -> Result<Vec<u8>> {
         let mut buffers = Vec::new();
         for (name, t) in &self.tensors {
             t.validate()?;
             let bytes: Vec<u8> = match t.kind {
+                Kind::Float if single => {
+                    ensure(
+                        t.data.iter().all(|&x| (x as f32).is_finite()),
+                        "output overflows f32",
+                    )?;
+                    t.data
+                        .iter()
+                        .flat_map(|&x| (x as f32).to_le_bytes())
+                        .collect()
+                }
                 Kind::Float => t.data.iter().flat_map(|x| x.to_le_bytes()).collect(),
                 Kind::Index => t
                     .data
@@ -230,6 +359,7 @@ impl Archive {
             .iter()
             .map(|(n, t, b)| {
                 let dtype = match t.kind {
+                    Kind::Float if single => Dtype::F32,
                     Kind::Float => Dtype::F64,
                     Kind::Index => Dtype::I64,
                     Kind::Bool => Dtype::BOOL,
@@ -237,7 +367,7 @@ impl Archive {
                 Ok(((*n).clone(), TensorView::new(dtype, t.shape.clone(), b)?))
             })
             .collect::<Result<Vec<_>>>()?;
-        Ok(safetensors::serialize(views, &Some(self.metadata.clone()))?)
+        sorted_metadata_header(safetensors::serialize(views, &Some(self.metadata.clone()))?)
     }
     pub fn save(&self, path: impl AsRef<std::path::Path>) -> Result<()> {
         std::fs::write(path, self.to_bytes()?)?;
@@ -271,15 +401,22 @@ impl Archive {
         }
     }
 }
-fn decode(dtype: Dtype, bytes: &[u8]) -> Result<(Kind, Vec<f64>)> {
-    macro_rules! convert {
-        ($ty:ty,$size:literal) => {
-            bytes
-                .chunks_exact($size)
-                .map(|x| <$ty>::from_le_bytes(x.try_into().unwrap()) as f64)
-                .collect()
-        };
-    }
+/// Decode a safetensors entry straight into `f32`, without the `f64` intermediate.
+///
+/// The prepared payload is stored as f32, but `AnnyF32::from_bytes` decoded every tensor to `f64`
+/// first (205.9 MB of intermediate for the 104.1 MB payload) and then converted each one back down.
+/// Measuring the reload in stages put 96 ms of its 229 ms in that round trip, so decode into the
+/// storage type directly instead. Integer and boolean entries widen to f32 the same way they widen
+/// to f64, which keeps [`Kind`] and every downstream label/coefficient rule identical.
+pub(crate) fn decode_f32(dtype: Dtype, bytes: &[u8]) -> Result<(Kind, Vec<f32>)> {
+    let (kind, element) = f32_layout(dtype)?;
+    let mut data = vec![0.; bytes.len() / element];
+    decode_f32_into(dtype, element, bytes, &mut data);
+    Ok((kind, data))
+}
+/// The [`Kind`] and element width of a dtype, or the error the decoders raise for one they cannot
+/// read. Splitting this out lets the parallel path reject an unsupported dtype before it spawns.
+fn f32_layout(dtype: Dtype) -> Result<(Kind, usize)> {
     let integer = matches!(
         dtype,
         Dtype::I8
@@ -298,48 +435,186 @@ fn decode(dtype: Dtype, bytes: &[u8]) -> Result<(Kind, Vec<f64>)> {
     } else {
         Kind::Float
     };
-    let data = match dtype {
-        Dtype::F64 => convert!(f64, 8),
-        Dtype::F32 => convert!(f32, 4),
-        Dtype::I64 => convert!(i64, 8),
-        Dtype::U64 => convert!(u64, 8),
-        Dtype::I32 => convert!(i32, 4),
-        Dtype::U32 => convert!(u32, 4),
-        Dtype::I16 => convert!(i16, 2),
-        Dtype::U16 => convert!(u16, 2),
-        Dtype::I8 => bytes.iter().map(|x| (*x as i8) as f64).collect(),
-        Dtype::U8 | Dtype::BOOL => bytes.iter().map(|x| *x as f64).collect(),
-        Dtype::BF16 => bytes
-            .chunks_exact(2)
-            .map(|x| {
-                f32::from_bits((u16::from_le_bytes(x.try_into().unwrap()) as u32) << 16) as f64
-            })
-            .collect(),
-        Dtype::F16 => bytes
-            .chunks_exact(2)
-            .map(|x| {
+    let element = match dtype {
+        Dtype::F64 | Dtype::I64 | Dtype::U64 => 8,
+        Dtype::F32 | Dtype::I32 | Dtype::U32 => 4,
+        Dtype::I16 | Dtype::U16 => 2,
+        Dtype::I8 | Dtype::U8 | Dtype::BOOL => 1,
+        other => {
+            return Err(crate::Error::Invalid(format!(
+                "unsupported safetensors dtype {other:?}"
+            )))
+        }
+    };
+    Ok((kind, element))
+}
+/// Elements below which a tensor is decoded on the calling thread: the payload's big tensors are
+/// hundreds of megabytes, its metadata tensors are a handful of entries, and thread setup would
+/// dominate the small ones.
+const PARALLEL_DECODE_ELEMENTS: usize = 1 << 16;
+/// Decode `bytes` into `out`, splitting large tensors over the available cores.
+///
+/// Every element converts independently, so how the input is chopped cannot change a value, and the
+/// chunks write to disjoint slices. A model reload is dominated by its one blendshape tensor, so the
+/// parallelism has to work inside a tensor, not only across tensors.
+fn decode_f32_into(dtype: Dtype, element: usize, bytes: &[u8], out: &mut [f32]) {
+    if out.len() < PARALLEL_DECODE_ELEMENTS {
+        decode_f32_chunk(dtype, bytes, out);
+        return;
+    }
+    let threads = crate::parallel::worker_threads(out.len().div_ceil(PARALLEL_DECODE_ELEMENTS));
+    if threads == 1 {
+        decode_f32_chunk(dtype, bytes, out);
+        return;
+    }
+    let per = out.len().div_ceil(threads);
+    std::thread::scope(|scope| {
+        for (source, destination) in bytes.chunks(per * element).zip(out.chunks_mut(per)) {
+            scope.spawn(move || decode_f32_chunk(dtype, source, destination));
+        }
+    });
+}
+/// One slice of a tensor, decoded the same way the serial loop decoded the whole thing.
+fn decode_f32_chunk(dtype: Dtype, bytes: &[u8], out: &mut [f32]) {
+    macro_rules! copy {
+        ($ty:ty,$size:literal) => {
+            for (value, x) in out.iter_mut().zip(bytes.chunks_exact($size)) {
+                *value = <$ty>::from_le_bytes(x.try_into().unwrap()) as f32;
+            }
+        };
+    }
+    match dtype {
+        Dtype::F64 => copy!(f64, 8),
+        Dtype::F32 => copy!(f32, 4),
+        Dtype::I64 => copy!(i64, 8),
+        Dtype::I32 => copy!(i32, 4),
+        Dtype::I16 => copy!(i16, 2),
+        Dtype::I8 => copy!(i8, 1),
+        Dtype::U64 => copy!(u64, 8),
+        Dtype::U32 => copy!(u32, 4),
+        Dtype::U16 => copy!(u16, 2),
+        Dtype::U8 => copy!(u8, 1),
+        Dtype::BOOL => {
+            for (value, &x) in out.iter_mut().zip(bytes) {
+                *value = if x == 0 { 0. } else { 1. };
+            }
+        }
+        // `f32_layout` rejects every other dtype before this is reached.
+        _ => {}
+    }
+}
+fn decode(dtype: Dtype, bytes: &[u8]) -> Result<(Kind, Vec<f64>)> {
+    let (kind, element) = f64_layout(dtype)?;
+    let mut data = vec![0.; bytes.len() / element];
+    decode_into(dtype, element, bytes, &mut data);
+    Ok((kind, data))
+}
+/// The f64 twin of [`f32_layout`]. It has to carry its own dtype table and error text: this decoder
+/// also reads the half-precision dtypes, and its message for an unreadable one is not the same
+/// string the f32 decoder uses.
+fn f64_layout(dtype: Dtype) -> Result<(Kind, usize)> {
+    let integer = matches!(
+        dtype,
+        Dtype::I8
+            | Dtype::U8
+            | Dtype::I16
+            | Dtype::U16
+            | Dtype::I32
+            | Dtype::U32
+            | Dtype::I64
+            | Dtype::U64
+    );
+    let kind = if integer {
+        Kind::Index
+    } else if dtype == Dtype::BOOL {
+        Kind::Bool
+    } else {
+        Kind::Float
+    };
+    let element = match dtype {
+        Dtype::F64 | Dtype::I64 | Dtype::U64 => 8,
+        Dtype::F32 | Dtype::I32 | Dtype::U32 => 4,
+        Dtype::I16 | Dtype::U16 | Dtype::BF16 | Dtype::F16 => 2,
+        Dtype::I8 | Dtype::U8 | Dtype::BOOL => 1,
+        other => {
+            return Err(Error::Invalid(format!(
+                "unsupported tensor dtype {other:?}"
+            )))
+        }
+    };
+    Ok((kind, element))
+}
+fn decode_into(dtype: Dtype, element: usize, bytes: &[u8], out: &mut [f64]) {
+    if out.len() < PARALLEL_DECODE_ELEMENTS {
+        decode_chunk(dtype, bytes, out);
+        return;
+    }
+    let threads = crate::parallel::worker_threads(out.len().div_ceil(PARALLEL_DECODE_ELEMENTS));
+    if threads == 1 {
+        decode_chunk(dtype, bytes, out);
+        return;
+    }
+    let per = out.len().div_ceil(threads);
+    std::thread::scope(|scope| {
+        for (source, destination) in bytes.chunks(per * element).zip(out.chunks_mut(per)) {
+            scope.spawn(move || decode_chunk(dtype, source, destination));
+        }
+    });
+}
+fn decode_chunk(dtype: Dtype, bytes: &[u8], out: &mut [f64]) {
+    macro_rules! copy {
+        ($ty:ty,$size:literal) => {
+            for (value, x) in out.iter_mut().zip(bytes.chunks_exact($size)) {
+                *value = <$ty>::from_le_bytes(x.try_into().unwrap()) as f64;
+            }
+        };
+    }
+    match dtype {
+        Dtype::F64 => copy!(f64, 8),
+        Dtype::F32 => copy!(f32, 4),
+        Dtype::I64 => copy!(i64, 8),
+        Dtype::U64 => copy!(u64, 8),
+        Dtype::I32 => copy!(i32, 4),
+        Dtype::U32 => copy!(u32, 4),
+        Dtype::I16 => copy!(i16, 2),
+        Dtype::U16 => copy!(u16, 2),
+        Dtype::I8 => {
+            for (value, &x) in out.iter_mut().zip(bytes) {
+                *value = (x as i8) as f64;
+            }
+        }
+        Dtype::U8 | Dtype::BOOL => {
+            for (value, &x) in out.iter_mut().zip(bytes) {
+                *value = x as f64;
+            }
+        }
+        Dtype::BF16 => {
+            for (value, x) in out.iter_mut().zip(bytes.chunks_exact(2)) {
+                *value =
+                    f32::from_bits((u16::from_le_bytes(x.try_into().unwrap()) as u32) << 16) as f64;
+            }
+        }
+        Dtype::F16 => {
+            for (value, x) in out.iter_mut().zip(bytes.chunks_exact(2)) {
                 let h = u16::from_le_bytes(x.try_into().unwrap());
                 let sign = if h & 0x8000 == 0 { 1. } else { -1. };
                 let e = ((h >> 10) & 31) as i32;
                 let f = (h & 1023) as f64;
-                sign * if e == 0 {
-                    f * 2f64.powi(-24)
-                } else if e == 31 {
-                    if f == 0. {
-                        f64::INFINITY
+                *value = sign
+                    * if e == 0 {
+                        f * 2f64.powi(-24)
+                    } else if e == 31 {
+                        if f == 0. {
+                            f64::INFINITY
+                        } else {
+                            f64::NAN
+                        }
                     } else {
-                        f64::NAN
-                    }
-                } else {
-                    (1. + f / 1024.) * 2f64.powi(e - 15)
-                }
-            })
-            .collect(),
-        _ => {
-            return Err(Error::Invalid(format!(
-                "unsupported tensor dtype {dtype:?}"
-            )))
+                        (1. + f / 1024.) * 2f64.powi(e - 15)
+                    };
+            }
         }
-    };
-    Ok((kind, data))
+        // `f64_layout` rejects every other dtype before this is reached.
+        _ => {}
+    }
 }

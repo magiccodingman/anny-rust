@@ -1,51 +1,25 @@
 # anny-rust
 
-**Native extension:** this branch now includes native tensor import, rigged GLB/glTF
-scenes and animation, OBJ/PLY/STL/glTF geometry I/O, authoring transforms, covariance
-and skin-weight preprocessing, optional checksummed caching, normal-mesh fitting,
-and secondary C/C#/WASM APIs. See [Authoring](docs/AUTHORING.md) and
-[Scenes and mesh I/O](docs/SCENES_AND_MESH_IO.md).
+Native Rust implementation of NAVER Anny pinned to
+`naver/anny@81ca83e202273b306205c1cc15f33734be31e48c` (ModelData schema 11).
 
-A normal checkout uses the committed `data/` directly: **no Python installation
-is needed**. The older Python helpers are optional upstream-reference utilities.
+**Normal build/runtime use is Python-free.** The repository includes the pinned asset payload and can also import the upstream data formats natively. Python helpers under `tools/` are optional reference/qualification utilities only.
 
-
-**The data payload is now included. No Python setup is needed to build or generate.**
-Native import from untouched upstream tensor archives is also available; see
-[Native import](docs/NATIVE_IMPORT.md). The older Python importer below is an
-optional developer/reference path, not a prerequisite for using this repository.
-
-
-A native Rust implementation of the Anny human-body geometry runtime, pinned to
-[NAVER Anny](https://github.com/naver/anny) revision
-`81ca83e202273b306205c1cc15f33734be31e48c` (ModelData schema 11).
-
-The runtime does not embed Python, PyTorch, LibTorch, CUDA, or NVIDIA Warp.
-It reads the original mesh, morph and rig assets and generates meshes, skeletons,
-and poses in Rust. A one-time import tool converts Python-specific tensor files
-to portable Safetensors without changing the original checkout.
-
-**Status:** native generation has passed 23 Python-reference configurations at
-`atol=1e-6`, `rtol=0`, including exact topology, UV indices, packed skinning indices,
-and labels. This is not a claim that every Python research helper, gradient API,
-or optional dependency has been reproduced. See [the compatibility matrix](docs/COMPATIBILITY.md)
-and [recorded validation](docs/VALIDATION.md) for the precise boundary.
+Native v1 covers body generation, true f64/f32 evaluation, authoring transforms, fitting/refinement, motion, rigged glTF/GLB, retained glTF materials/morphs/animation, and Rust/C/C#/WASM access. Fresh NAVER reference qualification passes 23/23 cases; see [V1 validation](docs/V1_VALIDATION.md) and [compatibility](docs/COMPATIBILITY.md).
 
 ## Workspace
 
 | Crate | Purpose |
 | --- | --- |
-| `anny-core` | Asset loaders, model construction, phenotype/local/facial blending, rest skeletons, five pose conventions, LBS/DQS, topology/rig transformations, fitting and geometry utilities |
-| `anny-cli` | `anny` command: prepare, generate, inspect, compare, measure, sample, fit |
-| `anny-capi` | Shared/static native library, opaque handles and a versioned C interface |
-| `anny-wasm` | Browser wrapper around the same runtime with owned typed-array results |
+| `anny-core` | Native assets/model math, f64/f32 evaluation, fitting/differentiation, motion, mesh/glTF authoring and utilities |
+| `anny-cli` | Preparation, generation, conversion, fitting, motion/AMASS and authoring commands |
+| `anny-capi` | Stable native C ABI with typed f64/f32 and serialized secondary operations |
+| `anny-wasm` | Browser/WASM wrapper with owned typed-array results and shared query/authoring operations |
+| `anny-gpu` | wgpu/WebGPU blendshape compute kernel, native/browser parity gates and resident-weight batching |
 
-Rust 1.90 or later is required. All math is CPU reference math, primarily float64;
-this first implementation prioritizes numerical compatibility, not a GPU or
-real-time performance claim. Large prepared model files and working buffers must
-be budgeted explicitly when embedding in a game or browser.
+Rust 1.90+ is required.
 
-## Build without assets
+## Build
 
 ```sh
 cargo build --workspace --release --locked
@@ -54,207 +28,207 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 ```
 
-The small test suite uses synthetic data and does not need Anny's asset payload,
-Python, a GPU, network downloads at runtime, or a full benchmark service.
+No Python, PyTorch, LibTorch, CUDA or Warp runtime is required.
 
-## Import an untouched upstream checkout (optional)
+## Generate characters
 
-The asset payload is already committed; skip this for normal use. To import a
-fresh copy using only Rust, build the CLI and use a **new destination**:
+Use committed assets directly:
 
 ```sh
-cargo build --release -p anny-cli --locked
-./target/release/anny import-upstream \
-  --source /home/slurp/Source/Not_Saved/anny \
-  --destination output/imported-data
-./target/release/anny verify-assets --assets output/imported-data
+./target/release/anny inspect --assets data
+
+./target/release/anny generate \
+  --assets data \
+  --config examples/all.json \
+  --params examples/character.json \
+  --precision f32 \
+  --mesh output/character.glb \
+  --rigged true \
+  --output output/character.safetensors
 ```
 
-The native importer copies the complete `src/anny/data/` hierarchy, converts the
-restricted tensor-archive formats actually used by the pinned source, converts
-YAML metadata, and writes a source/hash manifest. It never executes pickle globals
-or starts Python. See [Native import](docs/NATIVE_IMPORT.md) for its supported
-format subset and errors. The source checkout is read-only.
+`--precision f64` is the reference/high-precision path; `--precision f32` is a genuine single-precision evaluator using the same equations, not an output-only cast.
 
-The expected revision is `81ca83e202273b306205c1cc15f33734be31e48c`. Do not reset
-an original checkout containing edits. A detached worktree can supply the pinned
-source without disturbing it. External SMPL/SMPL-X downloads are neither requested
-nor bundled.
-
-## Generate a character
-
-```sh
-cargo run --release -p anny-cli --locked -- inspect --assets data
-cargo run --release -p anny-cli --locked -- generate \
-  --assets data --config examples/all.json --params examples/character.json \
-  --obj output/character.obj --output output/character.safetensors
-```
-
-Import `output/character.obj` into Blender. The mesh preserves upstream vertex
-and face ordering, separate UV indices, **meters and Z-up**. Coordinate conversion
-for a Y-up or left-handed game engine belongs in its integration wrapper; it is
-not silently applied to the parity implementation.
-
-`examples/all.json` enables every phenotype, local morph and facial action that
-upstream exposes. It does not invent new controls or bypass upstream filtering.
-Use `inspect --config examples/all.json` to enumerate the actual labels.
+Anny coordinates remain **meters and Z-up**. Engine-specific axis/handedness conversion belongs in the integration layer rather than the parity model.
 
 ## Prepare once, evaluate many times
 
 ```sh
-cargo run --release -p anny-cli --locked -- prepare \
-  --assets data --config examples/all.json --output output/anny-all.safetensors
-cargo run --release -p anny-cli --locked -- generate \
-  --model output/anny-all.safetensors --params examples/character.json \
-  --obj output/from-cache.obj
+./target/release/anny prepare \
+  --assets data \
+  --config examples/all.json \
+  --precision f32 \
+  --output output/anny-all-f32.safetensors
+
+./target/release/anny generate \
+  --model output/anny-all-f32.safetensors \
+  --params examples/character.json \
+  --mesh output/from-prepared.glb \
+  --rigged true
 ```
 
-A prepared model carries its configuration and precomputed ModelData. Loading it
-bypasses raw asset parsing. Shape, expression and pose parameters remain dynamic;
-preparing a model does **not** freeze one character. Reuse the loaded model for
-many evaluations. The CLI deliberately does not hide a disk cache; use `prepare`
-explicitly so the build/preparation phase is visible and reproducible.
+Prepared models keep model configuration/static data while phenotype, local/facial controls and pose remain dynamic. Optional content/config-addressed caching is also available for asset construction.
 
-Prepared files can be substantially larger than the compressed source assets.
-Keep them under `output/` or in your engine's asset packaging, **not in this PR's
-normal Git asset commit**.
+## Native import of an untouched upstream checkout
 
-## Native Rust use
+Normal users do not need this because `data/` is already committed. Maintainers can import a fresh pinned checkout without Python:
 
-```rust,no_run
-use anny_core::{assets::AssetStore, AnnyConfig, Parameters};
+```sh
+./target/release/anny import-upstream \
+  --source /path/to/naver/anny \
+  --destination output/imported-data
 
-fn main() -> anny_core::Result<()> {
-    let model = AssetStore::new("data").build(&AnnyConfig::default())?;
-    let input: Parameters = serde_json::from_str(
-        r#"{"phenotype_kwargs":{"height":0.65,"weight":0.4}}"#
-    )?;
-    let result = model.forward(&input)?;
-    let vertices = result.get("vertices")?; // shape [batch, vertex, xyz]
-    println!("{:?}", vertices.shape);
-    Ok(())
-}
+./target/release/anny verify-assets --assets output/imported-data
 ```
 
-Named parameter dictionaries accept scalars or batch vectors; stacked arrays use
-the reported label order. Missing shape parameters default to 0.5, local/facial
-parameters to zero, and omitted pose transforms to identity. Unknown controls,
-invalid shapes, inconsistent batches and malformed model data return errors.
+The importer understands the bounded `.pth/.pt` tensor-archive subset actually used by the pinned repository, plus YAML/OBJ/targets and associated asset metadata. It does not execute arbitrary pickle globals.
+
+## Fitting and native refinement
+
+Basic fitting:
+
+```sh
+./target/release/anny fit \
+  --assets data \
+  --target output/character.safetensors \
+  --options examples/fit-options.json \
+  --output output/fitted.json
+```
+
+Native v1 includes:
+
+- known-correspondence fitting,
+- initialized local closest-surface fitting,
+- explicit landmark similarity initialization,
+- specialized analytic JVP/VJP directions,
+- native Adam refinement,
+- optional inverter `post_gd`,
+- phenotype logit constraints,
+- root translation/rotation-vector refinement,
+- local/facial clamps,
+- shared phenotype fitting and optional calibrated-prior regularization.
+
+This is not a generic PyTorch-style autograd system and is not advertised as globally robust automatic registration for every arbitrary unaligned scan.
+
+## Motion and AMASS
+
+Native pose clips can be loaded/resampled/retargeted and exported as animation:
+
+```sh
+./target/release/anny motion \
+  --assets data \
+  --source examples/motion.json \
+  --fps 30 \
+  --precision f32 \
+  --output output/motion.glb
+```
+
+AMASS/SMPL-X arrays can be inspected and a supplied source model fitted:
+
+```sh
+./target/release/anny amass-inspect \
+  --source sequence.npz \
+  --output output/amass-info.json
+
+./target/release/anny amass-fit \
+  --assets data \
+  --source sequence.npz \
+  --source-model /path/to/supplied-smplx.safetensors \
+  --mapping explicit-map.json \
+  --options fit.json \
+  --output output/amass-fitted.glb \
+  --report output/amass-report.json
+```
+
+SMPL/SMPL-X/AMASS assets that are not committed by NAVER are not downloaded or bundled. The native baseline therefore requires the caller to supply legally obtained source data/correspondence where needed.
+
+## Mesh and glTF/GLB authoring
+
+Native interchange includes OBJ, PLY, STL and the documented glTF/GLB subset. Rigged GLB export includes skeleton hierarchy, skinning, bind transforms, UV seam handling and supplied skeletal animation.
+
+A retained `GltfAsset` document layer additionally supports:
+
+- morph-target channels,
+- embedded PNG/JPEG textures,
+- PBR materials,
+- animation import/sampling,
+- byte-oriented edit/query operations shared across native language boundaries.
+
+Use retained-document operations when materials/morphs/animation need to survive authoring. Geometry-only import intentionally returns flattened mesh geometry rather than pretending to round-trip every document object/extension.
+
+See [Scenes and mesh I/O](docs/SCENES_AND_MESH_IO.md) and [Authoring](docs/AUTHORING.md).
 
 ## C / C++ and C#
 
-The public contract is [include/anny.h](include/anny.h), ABI version 1. Build:
+The stable C contract is [include/anny.h](include/anny.h), ABI version 1.
 
 ```sh
 cargo build --release -p anny-capi --locked
 mkdir -p output
-cc -Wall -Wextra -Werror -I include examples/c_smoke.c \
-  -L target/release -lanny_capi -Wl,-rpath,"$PWD/target/release" -o output/c_smoke
-./output/c_smoke data
+cc -std=c11 -Wall -Wextra -Werror -Iinclude examples/c_smoke.c \
+  -Ltarget/release -lanny_capi -Wl,-rpath,"$PWD/target/release" \
+  -o output/c-smoke
+./output/c-smoke data
 ```
 
-On Linux the library is `target/release/libanny_capi.so`; the corresponding
-platform build produces a DLL or dylib. Do not expose Rust-native structures over
-the language boundary. The C API uses opaque model/output handles, caller-visible
-status codes, thread-local error messages and read-only borrowed tensor views.
-Tensor views remain valid only while their owning handle is alive. See the
-header's ownership and thread-safety notes before embedding.
+The C ABI uses opaque ownership/status/error handling and typed f64/f32 views. Shared serialized query operations expose measurements, keypoints, fitting/refinement, JVP/VJP, transforms and related secondary functionality.
 
-A .NET 10 example with SafeHandle ownership and managed copies is included:
+Re-posing the same character repeatedly is what `anny_session_new`/`anny_session_f32_new` are for: a session evaluates the phenotype, local changes, facial coefficients and the rest model once, and each `anny_session_update` then pays only for the pose. Sessions keep their own reference to the model, so the model handle may be freed first, and the views they return are invalidated only by the next update. `examples/c_smoke.c` asserts that a session's vertices equal `evaluate` exactly and that posing still works after the model handle is gone; `examples/c_float_smoke.c` does the same for the f32 ABI. Both are compiled and run by CI.
+
+The .NET 10 example wraps ownership with SafeHandle and exercises actual native calls:
 
 ```sh
-cargo run --release -p anny-cli --locked -- prepare \
-  --assets data --output output/anny-default.safetensors
+./target/release/anny prepare --assets data --output output/anny-default.safetensors
 LD_LIBRARY_PATH="$PWD/target/release${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-  dotnet run --project examples/csharp -- "$PWD/output/anny-default.safetensors"
+  dotnet run --project examples/csharp --configuration Release -- \
+  "$PWD/output/anny-default.safetensors"
 ```
 
-The C API was exercised from a real C executable. C# is an integration example,
-not a complete Unity package; the browser example is not a character-editor UI.
+`AnnyPoseSession` and `AnnySinglePrecisionPoseSession` are the managed session wrappers. They hold the managed model, so neither the managed nor the native model can be released while a session is alive, and the example asserts that the pose-only path agrees with `evaluate` exactly.
+
+A full Unity 6000 Runtime/Editor package now lives under `integrations/unity/`: native plugin packaging, managed ownership, Mesh/SkinnedMeshRenderer integration, humanoid mapping, editor controls, baking, and real Mono/IL2CPP player qualification. The shipped plugin is Linux x86_64; other platforms build the same C ABI for their target.
 
 ## WebAssembly
 
-The core can load an in-memory prepared model without filesystem access. The
-WASM wrapper copies output into owned JavaScript typed arrays. A compile check:
+The core loads prepared model bytes in-memory and returns owned JS typed arrays. `AnnyModel.poseSession()` (and `AnnyModelF32.poseSession()`) returns a reusable `AnnySession` whose `update()` re-poses without re-evaluating the rest of the model; like the other wrappers it returns owned copies and keeps the model alive itself. `examples/editor/` is a real three.js character editor over these bindings with generated phenotype/body/face/pose controls, materials/textures, clip preview, presets/state, and GLB export.
 
 ```sh
 rustup target add wasm32-unknown-unknown
 cargo check -p anny-wasm --target wasm32-unknown-unknown --locked
 ```
 
-To run the included local-file browser smoke page, build bindings with wasm-pack:
+An actual Chromium qualification has exercised the real model through WASM, including f64/f32 evaluation, measurements, JVP, an Adam refinement step, rigged GLB, texture/morph authoring and animation import/sampling. See [V1 validation](docs/V1_VALIDATION.md).
+
+The same WASM artifact also exposes the `anny-gpu` blendshape kernel through browser WebGPU. The browser editor and WebGPU path are both exercised in real Chrome; see `examples/editor/README.md`, `docs/GPU.md`, and `docs/VALIDATION.md`.
+
+## Reference qualification
+
+Optional developer-only Python reference generation remains available:
 
 ```sh
-wasm-pack build crates/anny-wasm --release --target web \
-  --out-dir ../../examples/browser/pkg
-python -m http.server --directory examples/browser 8000
-```
+PYTHONPATH=/path/to/naver/anny/src \
+  python tools/export_reference.py --output output/fixtures --cases all-cases
 
-Open `http://localhost:8000`, select a prepared `.safetensors` model and evaluate.
-Python in the last command is merely a replaceable static web server. It is not
-part of the browser's model runtime. Account for file size, browser memory and
-copies; no WebGPU backend is implemented in this PR.
-
-## Measurements, sampling and fitting
-
-```sh
-./target/release/anny measure --assets data
-./target/release/anny sample --assets data --options examples/sample-options.json \
-  --output output/random-params.json
-./target/release/anny generate --assets data --params output/random-params.json \
-  --obj output/random.obj
-./target/release/anny fit --assets data --target output/character.safetensors \
-  --options examples/fit-options.json --output output/fitted-params.json
-```
-
-Fitting expects corresponding vertices in the selected model's topology, not an
-arbitrary unrelated scan. Its implemented baseline uses joint registration and
-finite-difference shape fitting; optional upstream `post_gd`/autograd refinement
-is **not implemented**. Sampling follows the calibrated distributions but uses a
-native RNG, so a PyTorch seed does not produce the same random character.
-
-## Lightweight Python-reference validation
-
-Generate reference results in the original Anny environment (four cases by
-default), then consume them with the native binary:
-
-```sh
-PYTHONPATH=/home/slurp/Source/Not_Saved/anny/src \
-  python tools/export_reference.py --output output/fixtures
-python tools/check_parity.py --assets data --fixtures output/fixtures \
+python tools/check_parity.py \
+  --assets data \
+  --fixtures output/fixtures \
   --summary output/parity-summary.json
 ```
 
-Use `--cases all-cases` on the exporter for all 23 configurations. Reference
-creation may build large caches; this is optional, not a prerequisite for using
-the library. Expected inputs are serialized explicitly: there is no assumption
-of identical cross-language random-number generators. Missing fixtures fail;
-nothing is silently counted as a passed parity check.
+Fresh pinned-source qualification passes **23/23** cases at `atol=1e-6`, `rtol=0`, with integer arrays/labels exact. This is strong regression evidence, not a mathematical proof over every possible continuous input.
 
-The strict comparison checks all saved vertex/joint arrays, face and UV
-connectivity, packed skinning weights/indices, base vertex mapping and labels.
-Integer arrays/labels are exact. Floats use `atol=1e-6`, `rtol=0`. A successful
-23-case run is strong regression coverage, not an exhaustive proof for all inputs.
+## Post-v1 product and performance status
 
-## Add the imported assets to the existing PR
+The successor work that began after native-v1 is now delivered at the measured scope recorded in the repository:
 
-```sh
-git switch codex/anny-rust-native-port
-git status --short
-git add -- data
-git diff --cached --stat
-git commit -m "Import pinned Anny assets and portable tensor conversions"
-git push origin codex/anny-rust-native-port
-```
+1. **GPU/WebGPU foundation** — `anny-gpu` ships a real wgpu/Vulkan + browser WebGPU blendshape kernel with resident weights and strict CPU-parity qualification. Profiling showed that automatically routing normal single-character evaluation through this kernel would be slower; broader FK/skinning/fitting offload remains optional future GPU expansion rather than a fake speed claim.
+2. **SIMD investigation** — measured and closed: baseline x86-64 remains portable, while opt-in `x86-64-v3`/native builds gain roughly 5-15%; hand-written SIMD was not justified by the measured ceiling.
+3. **Unity Runtime/Editor package** — delivered under `integrations/unity/`, including editor and player validation.
+4. **Browser character editor** — delivered under `examples/editor/` and driven in real Chrome.
+5. **Profiling-driven performance work** — fixed the dominant redundant validation/allocation costs, accelerated prepare/reload/collision, added pose sessions, and documented rejected/optional optimizations.
 
-Only `data/` is staged in these commands. Do not `git add .` after generating
-hundreds of megabytes of prepared model caches.
+See [Porting status](docs/PORTING_STATUS.md), [performance](docs/PERFORMANCE.md), [GPU](docs/GPU.md), and [validation](docs/VALIDATION.md) for measured boundaries.
 
 ## Licensing
 
-The port preserves NAVER's Apache-2.0 attribution. MakeHuman/MPFB2 and Face Units
-assets have their own accompanying CC0 notices; SOMA assets have accompanying
-Apache-2.0 notices. CPU projection/BVH compatibility code adapts NVIDIA Warp's
-Apache-2.0 implementation and is attributed in [NOTICE](NOTICE). SMPL/SMPL-X
-assets and correspondence maps are separate, opt-in inputs with separate terms.
-No asset conversion changes the original license. See [LICENSE](LICENSE).
+The port preserves NAVER's Apache-2.0 attribution. MakeHuman/MPFB2 and Face Units assets carry their accompanying CC0 notices; SOMA assets carry their accompanying Apache-2.0 notices. NVIDIA Warp-derived compatibility code remains Apache-2.0 attributed in [NOTICE](NOTICE). SMPL/SMPL-X/AMASS data absent from upstream remains separately licensed, opt-in caller data. See [LICENSE](LICENSE).

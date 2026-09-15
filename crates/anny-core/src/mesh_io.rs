@@ -526,9 +526,10 @@ fn stl(bytes: &[u8]) -> Result<SurfaceMesh> {
     mesh.validate()?;
     Ok(mesh)
 }
-struct Gltf {
-    root: Value,
-    buffers: Vec<Vec<u8>>,
+#[derive(Clone, Debug)]
+pub(crate) struct Gltf {
+    pub(crate) root: Value,
+    pub(crate) buffers: Vec<Vec<u8>>,
 }
 fn usize_field(v: &Value, key: &str) -> Result<usize> {
     v.get(key)
@@ -559,6 +560,10 @@ fn float_array<const N: usize>(v: Option<&Value>, default: [f64; N]) -> Result<[
     Ok(o)
 }
 fn gltf(bytes: &[u8], directory: Option<&Path>) -> Result<SurfaceMesh> {
+    parse_gltf(bytes, directory)?.mesh()
+}
+pub(crate) fn parse_gltf(bytes: &[u8], directory: Option<&Path>) -> Result<Gltf> {
+    ensure(bytes.len() <= MAX_BYTES, "glTF document exceeds size limit")?;
     let (root, bin) = if bytes.starts_with(b"glTF") {
         ensure(bytes.len() >= 20, "truncated GLB header")?;
         ensure(
@@ -666,7 +671,7 @@ fn gltf(bytes: &[u8], directory: Option<&Path>) -> Result<SurfaceMesh> {
         ensure(total <= MAX_BYTES, "combined glTF buffers exceed limit")?;
         buffers.push(data[..n].to_vec());
     }
-    Gltf { root, buffers }.mesh()
+    Ok(Gltf { root, buffers })
 }
 impl Gltf {
     fn array(&self, key: &str) -> Result<&Vec<Value>> {
@@ -675,7 +680,7 @@ impl Gltf {
             .and_then(Value::as_array)
             .ok_or_else(|| bad(format!("missing glTF {key}")))
     }
-    fn view(&self, id: usize) -> Result<(&[u8], &Value)> {
+    pub(crate) fn view(&self, id: usize) -> Result<(&[u8], &Value)> {
         let v = self
             .array("bufferViews")?
             .get(id)
@@ -694,7 +699,7 @@ impl Gltf {
             v,
         ))
     }
-    fn accessor(&self, id: usize, width: usize) -> Result<Vec<f64>> {
+    pub(crate) fn accessor(&self, id: usize, width: usize) -> Result<Vec<f64>> {
         let a = self
             .array("accessors")?
             .get(id)
@@ -822,7 +827,7 @@ impl Gltf {
         )?;
         Ok(result)
     }
-    fn mesh(&self) -> Result<SurfaceMesh> {
+    pub(crate) fn mesh(&self) -> Result<SurfaceMesh> {
         let nodes = self.array("nodes")?;
         ensure(nodes.len() <= 100_000, "too many glTF nodes")?;
         let mut parents = vec![-1i32; nodes.len()];
@@ -971,6 +976,19 @@ impl Gltf {
                             }
                         }
                     }
+                }
+                if let Some(uv) = attr.get("TEXCOORD_0") {
+                    let uv = uv
+                        .as_u64()
+                        .and_then(|i| usize::try_from(i).ok())
+                        .ok_or_else(|| bad("invalid UV accessor index"))?;
+                    let values = self.accessor(uv, 2)?;
+                    ensure(values.len() == n * 2, "UV count mismatch")?;
+                    out.texcoords.resize(out.positions.len(), [0.; 2]);
+                    out.texcoords
+                        .extend(values.chunks_exact(2).map(|v| [v[0], v[1]]));
+                } else if !out.texcoords.is_empty() {
+                    out.texcoords.extend(std::iter::repeat_n([0.; 2], n));
                 }
                 let mut transformed = Vec::with_capacity(n);
                 if node.get("skin").is_some() {

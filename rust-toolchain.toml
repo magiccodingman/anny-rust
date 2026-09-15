@@ -1,0 +1,7 @@
+[toolchain]
+# The toolchain the native-v1 qualification was performed against, and the one
+# .github/workflows/ci.yml pins. Keeping it here means a plain `cargo clippy`
+# reproduces the qualified result instead of silently picking up a newer
+# toolchain with additional lints that the qualified result never covered.
+channel = "1.90.0"
+components = ["clippy", "rustfmt"]

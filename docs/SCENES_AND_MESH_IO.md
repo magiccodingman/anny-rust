@@ -1,93 +1,132 @@
-# Native scenes and mesh interchange
+# Scenes and mesh I/O
 
-All operations in this document run in Rust. No Python interpreter, Trimesh,
-Blender process, GPU or network service is required.
+Anny-Rust has two intentionally different 3D-data surfaces:
 
-## Generate one character or a lineup
+1. **Geometry/scene interchange** — load/save portable mesh geometry and emit rigged character scenes.
+2. **Retained glTF document authoring** — preserve/edit/query materials, images, morph targets and animations without flattening them to a bare mesh.
+
+Use the surface that matches the job; geometry import intentionally does not pretend to preserve every glTF document object.
+
+## Geometry formats
+
+Native geometry I/O supports:
+
+- OBJ
+- PLY
+- STL
+- the documented uncompressed triangle glTF/GLB subset
+
+Example conversion:
 
 ```sh
-cargo build --workspace --release --locked
-./target/release/anny generate --assets data --config examples/all.json \
-  --params examples/character.json --mesh output/character.glb --rigged true
-./target/release/anny lineup --assets data --config examples/all.json \
-  --params examples/lineup.json --output output/lineup.glb
-./target/release/anny generate --assets data --mesh output/character.ply
-./target/release/anny mesh-convert --source output/character.glb --destination output/surface.obj
+./target/release/anny mesh-convert \
+  --source input.obj \
+  --destination output.ply
 ```
 
-Create the destination directory first. `generate`/`lineup`/`mesh-convert` also create
-parent directories. `--mesh` accepts GLB, embedded-buffer glTF, OBJ, PLY and STL.
-`--obj` remains supported. A lineup JSON is an array of `{parameters, export}`
-objects; export options are `name`, `translation`, `color`, `rigged`, `batch_index`.
-Each character is a separate mesh/node/skeleton, not a concatenated mesh.
+OBJ preserves separate UV indexing where the format permits it. Anny coordinates remain meters and Z-up internally.
 
-## Static versus rigged
+The geometry-only glTF/GLB loader resolves the supported accessors/transforms into a `SurfaceMesh`. That is useful for fitting/conversion, but authored materials, animation clips and morph-channel document structure should be handled through `GltfAsset` when round-trip preservation matters.
 
-The default is a static mesh with its shape, expression and pose baked. Rigged
-GLB/glTF contains the shaped rest mesh, complete joint hierarchy, inverse bind
-matrices and current bone pose. Every positive skin influence is retained across
-JOINTS_n/WEIGHTS_n sets; it is not silently reduced to four weights. Zero-weight
-padding indices are canonicalized to zero for interchange.
+## Character GLB export
 
-Standard glTF skinning is LBS. A request to export a DQS model as a rigged glTF
-returns an error; static DQS export remains available and bakes the actual shape.
-Bone transforms and scene placements must be rigid; unsupported shear/scale is
-rejected instead of silently converted into a different rotation.
+Generate a real rigged character:
 
-UV seams are split as required by glTF's single vertex indexing. A
-`sourceVertexIndices` extras array records their relationship to the original mesh.
-The original Anny model and numerical output vertex ordering are unchanged.
-Normals are area-weighted; unused/degenerate normals receive a unit fallback.
-UV V coordinates are converted from Anny/OBJ's bottom-origin to glTF's top-origin.
-Material color, roughness, alpha, and double-sided state are written. Arbitrary
-upstream Blender material node graphs are not translated.
+```sh
+./target/release/anny generate \
+  --assets data \
+  --config examples/all.json \
+  --params examples/character.json \
+  --precision f32 \
+  --mesh output/character.glb \
+  --rigged true
+```
 
-## Coordinate system
+Rigged LBS GLB output includes:
 
-The core stays Z-up, in meters. glTF files carry a -90 degree X scene-root rotation
-to standard Y-up. Joint roots carry that conversion too; skinned mesh nodes remain
-at the scene root, because glTF ignores mesh-node transforms when skinning.
-The geometry importer converts glTF world-space output back to Z-up meters.
-OBJ/PLY/STL are read/written in Z-up meters. STL itself cannot record these units.
+- separate mesh and skeleton nodes,
+- bone hierarchy,
+- positive skin influences,
+- inverse bind transforms,
+- current pose,
+- UV seam splitting with source-vertex recovery metadata,
+- supplied skeletal animation where requested.
 
-## Rust animation and byte APIs
+DQS deformation can be exported as baked geometry, but it is not falsely labeled as ordinary glTF linear skinning.
 
-`scene::Scene::add_character` returns an object index. `Scene::add_animation`
-accepts strictly increasing sample times and absolute bone poses for that object's
-rig. Export creates ordinary glTF translation/quaternion animation channels with
-continuous quaternion signs. Shape is fixed for the clip; animated phenotype or
-facial blendshape channels are not implemented in this slice.
+## Multi-character scenes
 
-`Scene::to_glb()` / `to_gltf()` return bytes without filesystem use. C exposes
-`anny_model_export_glb` plus an owned `AnnyBytes` handle. The C# example adds
-`AnnyModel.ExportGlb()`. WASM exposes `AnnyModel.export_glb()` as an owned Uint8Array.
-Free C byte handles with `anny_bytes_free`, never with another allocator.
+`Scene` supports independent character instances/transforms in one GLB. CLI example:
 
-## Geometry import boundary
+```sh
+./target/release/anny lineup \
+  --assets data \
+  --config examples/all.json \
+  --params examples/lineup.json \
+  --output output/lineup.glb
+```
 
-`mesh_io::load`/`from_bytes` read:
+Each character keeps its own rig/mesh nodes rather than being collapsed into one synthetic skin.
 
-- OBJ triangles/quads, negative indices and multiple object records;
-- ASCII, binary little-endian and binary big-endian PLY, skipping extra properties;
-- ASCII and binary STL (coincident vertices welded by exact coordinate values);
-- glTF 2.0/GLB triangle primitives, strided/sparse attributes, embedded or local
-  relative buffers, node transforms, default morph weights and default skin pose.
+## Skeletal motion
 
-This is a geometry reader for fitting/conversion, not a lossless whole-scene
-editor. glTF import flattens the selected default scene; animations are not sampled,
-materials/textures are not preserved, and compressed/required extensions fail.
-PLY/STL export is geometry-only. Arbitrary polygons, Draco/meshopt and external
-network buffer URLs are not accepted. External buffer paths cannot escape the
-source document directory, including through symlinks. In-memory glTF requires
-embedded buffers. Files/combined buffers are capped at 512 MiB.
+Native `PoseClip` sequences can be interpolated/resampled and exported:
 
-A different file format does not establish fitting correspondences. Do not assume
-an arbitrary scan's vertex i is Anny vertex i just because both load successfully.
+```sh
+./target/release/anny motion \
+  --assets data \
+  --source examples/motion.json \
+  --fps 30 \
+  --precision f32 \
+  --output output/motion.glb
+```
 
-## Checks
+Pose data is explicit about Anny pose parameterization; pose values are not silently reinterpreted between incompatible conventions.
 
-Native tests cover file round trips, multiple OBJ objects, UV seam mapping,
-GLB/embedded-glTF skinned pose and axis round trips, animation layout and invalid
-inputs. Khronos glTF Validator 2.0.0-dev.3.10 reported zero errors and zero warnings
-for both a two-character animated synthetic scene and a real 104-bone Anny GLB.
-The existing numerical model implementation was not changed by these exporters.
+## Retained glTF authoring
+
+`GltfAsset` keeps a base-glTF document plus its buffers/images so higher-level authoring does not need to flatten through `SurfaceMesh`.
+
+Supported native-v1 authoring includes:
+
+- morph-target channels,
+- morph weight animation,
+- skeletal/TRS animation import and sampling,
+- PNG/JPEG embedding,
+- PBR material representation,
+- material/morph/animation edit/query operations,
+- GLB byte output usable from Rust, C/C# and WASM.
+
+CLI:
+
+```sh
+./target/release/anny gltf-edit \
+  --source input.glb \
+  --operations edits.json \
+  --output output/authored.glb
+
+./target/release/anny gltf-query \
+  --source output/authored.glb \
+  --request query.json \
+  --output output/query.json
+```
+
+The animation loader validates accessor type, normalization and time bounds. Legal normalized integer rotation/weight channels are supported where base glTF permits them. Quaternion sampling normalizes results and uses shortest-path interpolation for linear rotation channels.
+
+## Validation
+
+Real generated Anny GLBs and synthetic/multi-character animation scenes have been checked with Khronos glTF Validator. An actual Chromium qualification also authored a rigged/morphed/textured animated GLB which validated with **0 errors and 0 warnings**.
+
+See [V1 validation](V1_VALIDATION.md) for exact qualification evidence.
+
+## Explicit limitations
+
+Native v1 does not claim every possible glTF extension or compressed asset format. In particular:
+
+- unsupported vendor/extensions/codecs are not silently accepted as equivalent base glTF,
+- geometry-only import does not retain authored PBR/animation/morph-document state,
+- the complete browser editor UI is not part of this layer,
+- WebGPU acceleration is not implemented yet,
+- Unity-specific scene/renderer packaging remains a later phase.
+
+These boundaries are intentional; they keep the core portable rather than pulling a large 3D editor/runtime dependency stack into the Rust model library.

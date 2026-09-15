@@ -1,182 +1,298 @@
 {
-  "upstream_revision": "81ca83e202273b306205c1cc15f33734be31e48c",
-  "reference_data_version": 11,
   "atol": 1e-06,
-  "rtol": 0,
+  "browser_artifact": {
+    "bytes": 2323922,
+    "extra_bytes_with_gpu": 90977,
+    "note": "Built with cargo build --release --locked --target wasm32-unknown-unknown -p anny-wasm, then wasm-bindgen --target web, from the final merge-gate tree. A rebuild from the same tree reproduces this digest byte for byte (verified with cmp), so the qualified artifact is this source revision. Size alone does not identify it: the previous revision produced a different digest at a similar size, because panic locations embed file and line. This revision also carries the caller-input validation in the GPU entry points, which is most of the growth over the previous 2,321,153 bytes. Both browser suites were re-run against the digest recorded here.",
+    "path": "output/wasm-web/anny_wasm_bg.wasm",
+    "sha256": "2327bdf40b5d3629868fd97d832ae9852871275cd42bfa30f8014e1b4307053d",
+    "size_without_gpu": 2232945
+  },
+  "browser_editor_execution": "Google Chrome 152.0.7977.64 through examples/qualification/editor-smoke.cjs (system Chrome via CHROMIUM_PATH; developer-only, not run by CI): 14/14 checks passed against the final artifact (2,323,922 bytes, sha256 2327bdf4...) with no page errors and a clean console - panels built from describe(), a panel slider that moves the mesh, the same parameter through the editor's own entry point, posing through the pose session, an exact return to rest, GLB export accepted by the official glTF validator (0 errors, skins present), state save/load round trip, seeded randomisation, a texture applied to the material, clip playback, and 27,420 triangles drawn",
+  "browser_editor_tested": true,
+  "browser_execution": "Google Chrome 152.0.7977.64 through examples/qualification/browser.cjs (system Chrome via CHROMIUM_PATH; developer-only, not run by CI): full smoke passed with no page errors (browser 152.0.7977.64, maxPositionError 9.2e-7, 13718 vertices, 82260 index entries), including the two checks that are the browser-side form of the session-lifetime correction - 'f64 pose session survives its model being freed' and 'f32 pose session survives its model being freed' - plus the f64 and f32 pose sessions matching evaluate exactly, a deterministic prepared reload, f64 arrays surviving memory growth and disposal, and the animation/material round trip",
+  "browser_execution_tested": true,
+  "browser_webgpu_execution": "Google Chrome 152.0.7977.64 through examples/qualification/webgpu-smoke.cjs (system Chrome via CHROMIUM_PATH, --enable-unsafe-webgpu; developer-only, not run by CI): 8/8 checks passed against the same anny_wasm_bg.wasm (2,323,922 bytes, sha256 2327bdf4...) the editor suite passes 14/14 with. navigator.gpu present, the four GPU exports bound, the default character's own coefficients (128 of 2496 nonzero, 5.13%), WebGPU output worst absolute difference 0 vs the f32 CPU reference over 4 x 41,154 values at batch 4 and 0 again on a second run, no page errors, and the malformed-input check added for this revision: a coefficient array three values short of batch x c and a zero batch both come back as ordinary JS errors - 'expected 2496 coefficients for batch 4 x 624, got 2493' and 'batch and coefficient count must be nonzero' - rather than a Rust trap or a wgpu validation failure. Adapter name redacted by Chrome; reported as ' [BrowserWebGpu]', so the backend - not the name - is what proves the call went through WebGPU",
+  "browser_webgpu_tested": true,
+  "c_abi_smoke": "ABI 1: 13718 vertices, 27420 faces; pose sessions match evaluate exactly (f64+f32) and survive anny_model_free. The final-review correction that declared the borrowed session ahead of its Arc owner was hammered by a throwaway harness (not committed): 200 pose updates on a session whose model handle had already been freed and bit-identical to the reference, 200 f64 and 200 f32 create/update/free cycles, and 60 sessions destroyed after their model, all clean under MALLOC_CHECK_=3 and MALLOC_PERTURB_=170. Swapping the field order back still passed the same harness on this host, so the fix is an invariant fix rather than an observable-crash fix: the session's Drop never dereferences the borrowed model",
+  "cache_reload_passed": true,
   "cases": [
     {
       "case": "all",
-      "passed": true,
+      "exact_index_and_label_checks": true,
       "maximum_array_error": 6.505573432953114e-11,
       "maximum_vertex_error": 8.079044377939937e-12,
-      "exact_index_and_label_checks": true
+      "passed": true
     },
     {
       "case": "batch",
-      "passed": true,
+      "exact_index_and_label_checks": true,
       "maximum_array_error": 7.221172505645455e-12,
       "maximum_vertex_error": 1.856948622647181e-12,
-      "exact_index_and_label_checks": true
+      "passed": true
     },
     {
       "case": "cmu_mb",
-      "passed": true,
+      "exact_index_and_label_checks": true,
       "maximum_array_error": 1.7095782878229215e-07,
       "maximum_vertex_error": 2.5262895525512974e-08,
-      "exact_index_and_label_checks": true
+      "passed": true
     },
     {
       "case": "default",
-      "passed": true,
+      "exact_index_and_label_checks": true,
       "maximum_array_error": 3.389926679988635e-09,
       "maximum_vertex_error": 6.348477317843007e-10,
-      "exact_index_and_label_checks": true
+      "passed": true
     },
     {
       "case": "dqs",
-      "passed": true,
+      "exact_index_and_label_checks": true,
       "maximum_array_error": 9.031874206866242e-10,
       "maximum_vertex_error": 9.031874206866242e-10,
-      "exact_index_and_label_checks": true
+      "passed": true
     },
     {
       "case": "extrapolate",
-      "passed": true,
+      "exact_index_and_label_checks": true,
       "maximum_array_error": 1.9630943987999e-09,
       "maximum_vertex_error": 3.7011663872599243e-10,
-      "exact_index_and_label_checks": true
+      "passed": true
     },
     {
       "case": "game_engine",
-      "passed": true,
+      "exact_index_and_label_checks": true,
       "maximum_array_error": 4.182227785198833e-07,
       "maximum_vertex_error": 5.679458414675764e-08,
-      "exact_index_and_label_checks": true
+      "passed": true
     },
     {
       "case": "hand_left",
-      "passed": true,
+      "exact_index_and_label_checks": true,
       "maximum_array_error": 4.440892098500626e-15,
       "maximum_vertex_error": 1.6930901125533637e-15,
-      "exact_index_and_label_checks": true
+      "passed": true
     },
     {
       "case": "hand_right",
-      "passed": true,
+      "exact_index_and_label_checks": true,
       "maximum_array_error": 3.9968028886505635e-15,
       "maximum_vertex_error": 2.115061598084722e-15,
-      "exact_index_and_label_checks": true
+      "passed": true
     },
     {
       "case": "head",
-      "passed": true,
+      "exact_index_and_label_checks": true,
       "maximum_array_error": 1.1189937865196953e-12,
       "maximum_vertex_error": 1.942890293094024e-15,
-      "exact_index_and_label_checks": true
+      "passed": true
     },
     {
       "case": "local_bone",
-      "passed": true,
+      "exact_index_and_label_checks": true,
       "maximum_array_error": 1.58089063157745e-09,
       "maximum_vertex_error": 2.9452057459522507e-10,
-      "exact_index_and_label_checks": true
+      "passed": true
     },
     {
       "case": "local_bone_world",
-      "passed": true,
+      "exact_index_and_label_checks": true,
       "maximum_array_error": 1.58089063157745e-09,
       "maximum_vertex_error": 2.9452057459522507e-10,
-      "exact_index_and_label_checks": true
+      "passed": true
     },
     {
       "case": "makehuman",
-      "passed": true,
+      "exact_index_and_label_checks": true,
       "maximum_array_error": 7.053356606556704e-07,
       "maximum_vertex_error": 6.819054750861753e-07,
-      "exact_index_and_label_checks": true
+      "passed": true
     },
     {
       "case": "mixamo",
-      "passed": true,
+      "exact_index_and_label_checks": true,
       "maximum_array_error": 9.136938947662543e-07,
       "maximum_vertex_error": 1.1787916176508872e-07,
-      "exact_index_and_label_checks": true
+      "passed": true
     },
     {
       "case": "notoes",
-      "passed": true,
+      "exact_index_and_label_checks": true,
       "maximum_array_error": 1.58089063157745e-09,
       "maximum_vertex_error": 2.9137144780255753e-10,
-      "exact_index_and_label_checks": true
+      "passed": true
     },
     {
       "case": "procrustes",
-      "passed": true,
+      "exact_index_and_label_checks": true,
       "maximum_array_error": 9.698107195088568e-08,
       "maximum_vertex_error": 7.549516567451064e-15,
-      "exact_index_and_label_checks": true
+      "passed": true
     },
     {
       "case": "pruned",
-      "passed": true,
+      "exact_index_and_label_checks": true,
       "maximum_array_error": 1.58089063157745e-09,
       "maximum_vertex_error": 2.935606566861759e-10,
-      "exact_index_and_label_checks": true
+      "passed": true
     },
     {
       "case": "quads",
-      "passed": true,
+      "exact_index_and_label_checks": true,
       "maximum_array_error": 1.58089063157745e-09,
       "maximum_vertex_error": 2.91371449537281e-10,
-      "exact_index_and_label_checks": true
+      "passed": true
     },
     {
       "case": "soma",
-      "passed": true,
+      "exact_index_and_label_checks": true,
       "maximum_array_error": 3.683164884193957e-14,
       "maximum_vertex_error": 2.55351295663786e-15,
-      "exact_index_and_label_checks": true
+      "passed": true
     },
     {
       "case": "soma_anny",
-      "passed": true,
+      "exact_index_and_label_checks": true,
       "maximum_array_error": 3.683164884193957e-14,
       "maximum_vertex_error": 2.55351295663786e-15,
-      "exact_index_and_label_checks": true
+      "passed": true
     },
     {
       "case": "soma_topology",
-      "passed": true,
+      "exact_index_and_label_checks": true,
       "maximum_array_error": 1.58089063157745e-09,
       "maximum_vertex_error": 2.912801111421004e-10,
-      "exact_index_and_label_checks": true
+      "passed": true
     },
     {
       "case": "world",
-      "passed": true,
+      "exact_index_and_label_checks": true,
       "maximum_array_error": 1.58089063157745e-09,
       "maximum_vertex_error": 3.1559800519470604e-10,
-      "exact_index_and_label_checks": true
+      "passed": true
     },
     {
       "case": "world_orient",
-      "passed": true,
+      "exact_index_and_label_checks": true,
       "maximum_array_error": 1.58089063157745e-09,
       "maximum_vertex_error": 3.14808082380047e-10,
-      "exact_index_and_label_checks": true
+      "passed": true
     }
   ],
-  "native_tests": 16,
+  "gpu_parity": "crates/anny-gpu/tests/parity.rs under ANNY_REQUIRE_GPU=1 on an NVIDIA RTX 3090 (Vulkan): the GPU kernel matches anny_core::typed::apply_blendshapes within 1e-5 absolute for synthetic vectors (9.5e-7 at batch 1, 1.4e-6 at 4, 1.6e-6 at 16, 1.9e-6 at 64) and for coefficients taken from the shipped phenotype path (1.8e-7 for the default character, 2.4e-7 for a batch nudged by 0.02, 4.8e-7 for a batch spread across the phenotype range); the resident-weights path reproduces the one-shot path bit for bit and the llvmpipe control is bit-exact; the fourth case drives malformed caller input (a coefficient count that is one short, and a batch multiplier that would overflow it) through both real entry points and gets GpuError::InvalidInput instead of a panic or a wgpu validation failure, while the valid call in the same test still returns a result",
+  "gpu_parity_tested": true,
+  "native_tests": 123,
+  "native_tests_detail": "cargo test --workspace --release: 107 passed, 0 failed, 16 ignored across 35 suites (2026-09-15 final tree; the extra suite is anny-gpu/tests/boundaries.rs, which covers the public shape rules without a device, and 4 of the passing tests are the anny-gpu parity cases under ANNY_REQUIRE_GPU=1)",
+  "payload_reproducible": "the same build writes byte-identical prepared payloads (f64 and f32) in every process; the safetensors header is re-emitted with its keys sorted because the crate serializes __metadata__ straight out of a HashMap",
+  "real_smpl_assets_tested": false,
+  "reference_data_version": 11,
   "reference_environment": {
     "python": "3.13.5",
-    "torch": "2.10.0+cpu",
     "roma": "1.6.1",
-    "warp": "1.9.1",
-    "rust": "1.90.0"
+    "rust": "1.90.0",
+    "torch": "2.10.0+cpu",
+    "warp": "1.9.1"
   },
-  "cache_reload_passed": true,
-  "c_abi_smoke": "ABI 1: 13718 vertices, 27420 faces",
+  "rtol": 0,
+  "unity_animation": {
+    "bones": 104,
+    "frame_rate": 30.0,
+    "note": "AnimationClip baked from native evaluations via AnnyClipBaker; sampling the clip with AnimationClip.SampleAnimation reproduces every bone's world position",
+    "tolerance_m": 0.001,
+    "worst_phenotype_sample_m": 0.0,
+    "worst_pose_sample_m": 3e-07
+  },
+  "unity_editmode": {
+    "failed": 0,
+    "name": "Unity EditMode suites",
+    "passed": 34,
+    "total": 34
+  },
+  "unity_editor": "6000.6.0f1",
+  "unity_exactness": {
+    "influences_per_vertex": 9,
+    "mesh_vs_native_array_m": 0.0,
+    "quality_level": "Ultra",
+    "single_precision_vs_wide_m": 5e-07,
+    "skin_weights": "Unlimited",
+    "skinning_identity_at_bind_pose_m": 3.3e-07,
+    "unity_bake_vs_native_vertices_m": 6.24606e-07
+  },
+  "unity_humanoid": {
+    "avatar_is_human": true,
+    "avatar_is_valid": true,
+    "bones_outside_the_definition": 50,
+    "mapped_bones": 54,
+    "missing_required_slots": 0,
+    "note": "Unity's own verdict on the avatar AnnyHumanoid.Build returns for the anny rig's unmodified hierarchy; the 50 bones the humanoid definition cannot carry are named in integrations/unity/README.md, so humanoid playback approximates Anny's pose while baked Anny clips stay exact",
+    "rig_bones": 104,
+    "slots_filled": 54
+  },
+  "unity_physics": {
+    "bounds_tolerance_m": 0.001,
+    "delta_m": 0.0,
+    "note": "Skinned mode: the collider is the character's bind-pose surface; Exact mode: the collider follows the evaluated surface and is re-cooked on evaluation",
+    "raycast_collider_m": 1.026502,
+    "raycast_mesh_m": 1.026502,
+    "tolerance_m": 0.001
+  },
+  "unity_players": {
+    "editor": "6000.6.0f1",
+    "il2cpp": {
+      "backend": "il2cpp",
+      "bones": 104,
+      "bytes": 287236840,
+      "influences": 9,
+      "mesh_vertices": 82260,
+      "per_update_ms": {
+        "iterations": 20,
+        "phenotype": {"median": 13.156, "min": 10.898},
+        "pose_session": {"median": 0.278, "min": 0.267},
+        "updates_counted": 40
+      },
+      "ran": true,
+      "result": "Succeeded",
+      "signed_volume": 0.05101392,
+      "triangles": 27420,
+      "vertices": 13718
+    },
+    "mono": {
+      "backend": "mono",
+      "bones": 104,
+      "bytes": 97050563,
+      "influences": 9,
+      "mesh_vertices": 82260,
+      "per_update_ms": {
+        "iterations": 20,
+        "phenotype": {"median": 18.559, "min": 15.835},
+        "pose_session": {"median": 0.324, "min": 0.289},
+        "updates_counted": 40
+      },
+      "ran": true,
+      "result": "Succeeded",
+      "signed_volume": 0.05101393,
+      "triangles": 27420,
+      "vertices": 13718
+    },
+    "note": "Both players build from the same scene and generate the same character through the native plugin - the rebuilt 3,863,512-byte libanny.so (sha256 37f5c50c...) staged from this tree, whose copies inside both built players were verified to be that same file, so neither player can be running the pre-review binary. Geometry, topology, influence width and signed volume are identical across backends; the signed volume differs only in the last float digit. Each run also measures the per-update cost in the player and checks that AnnyCharacter.Evaluations advanced by exactly two per measured iteration. The phenotype figure moved from 0.57 ms (Mono) and 0.70 ms (IL2CPP) because the player's character runs in AnnyUpdateMode.Skinned and a full shape update now rebuilds the phenotype-dependent bind geometry, bind poses and rig - the correction that stops Unity skinning the old body's rest surface. Pose-only updates, which are the per-frame path, are unchanged at roughly 0.3 ms. The numbers were re-measured on an idle machine because the build-time run was contended; the shape-change cost is the honest price of the corrected behaviour, not a regression in the evaluation itself.",
+    "script": "integrations/unity/tools/build-players.sh"
+  },
+  "unity_players_tested": true,
+  "unity_plugin": {
+    "bytes": 3863512,
+    "note": "Staged from this tree with integrations/unity/tools/build-native.sh --strip, 41 exported anny_ symbols. The binary committed at the start of this pass was 3,863,752 bytes and predated the session-lifetime correction in the C ABI, so it was rebuilt before any Unity or player qualification ran; rebuilding and re-stripping from the restored source reproduces this exact file.",
+    "path": "integrations/unity/package/Plugins/x86_64/libanny.so",
+    "sha256": "37f5c50c832e6c077ba15e0ed740c53e63b181392fca1fe9ba3973c9542abe8a"
+  },
+  "unity_playmode": {
+    "failed": 0,
+    "name": "Unity PlayMode suites",
+    "notes": "three physics tests, two animation tests, the update-counter test that pins one count per update, and the three final-review regressions: a phenotype change rebuilds the pose session before the next pose, a Skinned phenotype change rebuilds bind geometry and still bakes within tolerance, and repeated regeneration replaces the old rig hierarchy instead of accumulating it. Each of the three was mutation-checked by reverting the correction it guards, and each failed only then",
+    "passed": 14,
+    "total": 14
+  },
+  "unity_tested": true,
+  "upstream_revision": "81ca83e202273b306205c1cc15f33734be31e48c",
   "wasm_compilation_passed": true,
-  "browser_execution_tested": false,
-  "real_smpl_assets_tested": false
+  "wasm_node_execution_passed": "pose sessions (f64 and f32) match evaluate exactly and survive their model being freed"
 }

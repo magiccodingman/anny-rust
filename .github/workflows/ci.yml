@@ -44,6 +44,9 @@ jobs:
           cc -std=c11 -Wall -Wextra -Werror -Iinclude examples/c_smoke.c \
             -Ltarget/release -lanny_capi -Wl,-rpath,"$PWD/target/release" -o output/c-smoke
           ./output/c-smoke data
+          cc -std=c11 -Wall -Wextra -Werror -Iinclude examples/c_float_smoke.c \
+            -Ltarget/release -lanny_capi -Wl,-rpath,"$PWD/target/release" -o output/c-float-smoke
+          ./output/c-float-smoke data
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
@@ -53,6 +56,20 @@ jobs:
         run: |
           export LD_LIBRARY_PATH="$PWD/target/release:${LD_LIBRARY_PATH:-}"
           dotnet run --project examples/csharp --configuration Release --no-build -- "$PWD/output/ci-model.safetensors"
+      - name: Run the WebAssembly bindings under Node
+        shell: bash
+        run: |
+          # `cargo check --target wasm32` above only compiles: the parallel helpers call
+          # `std::thread`, which compiles for wasm32 and panics when a thread is actually created, so
+          # the browser bindings have to be executed, not merely built.
+          version=$(awk '/^name = "wasm-bindgen"$/{getline; gsub(/[^0-9.]/, ""); print; exit}' Cargo.lock)
+          curl -sSL -o /tmp/wasm-bindgen.tar.gz \
+            "https://github.com/rustwasm/wasm-bindgen/releases/download/${version}/wasm-bindgen-${version}-x86_64-unknown-linux-musl.tar.gz"
+          tar xzf /tmp/wasm-bindgen.tar.gz -C /tmp
+          install -m 755 "/tmp/wasm-bindgen-${version}-x86_64-unknown-linux-musl/wasm-bindgen" ~/.cargo/bin/
+          cargo build --release --locked --target wasm32-unknown-unknown -p anny-wasm
+          wasm-bindgen target/wasm32-unknown-unknown/release/anny_wasm.wasm --target nodejs --out-dir output/wasm-node
+          node examples/qualification/wasm-node-smoke.cjs output/wasm-node output/ci-model.safetensors
       - name: Regenerate native authoring references (opt-in)
         if: github.event_name == 'workflow_dispatch' && inputs.native_authoring
         run: cargo test -p anny-core --release --locked --test authoring -- --ignored --nocapture --test-threads=1

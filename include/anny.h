@@ -17,6 +17,7 @@ extern "C" {
  */
 typedef struct AnnyModel AnnyModel;
 typedef struct AnnyOutput AnnyOutput;
+typedef struct AnnySession AnnySession;
 typedef struct { const double *data; size_t len; const size_t *shape; size_t rank; uint32_t kind; } AnnyTensorView;
 uint32_t anny_abi_version(void);
 const char *anny_last_error(void); /* borrowed, same-thread next-call lifetime */
@@ -29,6 +30,18 @@ void anny_output_free(AnnyOutput *output);
 int32_t anny_model_tensor(const AnnyModel *model,const char *name,AnnyTensorView *out);
 int32_t anny_output_tensor(const AnnyOutput *output,const char *name,AnnyTensorView *out);
 int32_t anny_model_describe(const AnnyModel *model,char **out);
+/* Reusable pose sessions: the phenotype/local-change/facial coefficients and the
+ * rest model are computed once in anny_session_new, so each anny_session_update
+ * costs only the pose-dependent half. Use them for animation, editor sliders and
+ * any repeated re-posing of one parameter set, where anny_model_evaluate would
+ * redo the fixed half every frame. A session owns a reference to its model, so the
+ * model handle may be freed first. Views from anny_session_tensor are invalidated
+ * by the next update of that session. */
+int32_t anny_session_new(const AnnyModel *model,const char *parameters_json,AnnySession **out);
+int32_t anny_session_update(AnnySession *session,const char *pose_json);
+int32_t anny_session_tensor(const AnnySession *session,const char *name,AnnyTensorView *out);
+int32_t anny_session_coefficients(const AnnySession *session,AnnyTensorView *out);
+void anny_session_free(AnnySession *session);
 void anny_string_free(char *s);
 /* Additive ABI-1 export API; GLB has standard Y-up coordinates and f32 attributes. */
 typedef struct AnnyBytes AnnyBytes;
@@ -43,6 +56,34 @@ int32_t anny_model_query(const AnnyModel *model,const char *request_json,char **
 int32_t anny_model_transform(const AnnyModel *model,const char *operations_json,AnnyModel **out);
 int32_t anny_model_prepared_bytes(const AnnyModel *model,AnnyBytes **out);
 int32_t anny_model_transfer_pose(const AnnyModel *source,const AnnyModel *target,const char *parameters_json,const char *mode,char **out);
+/* Additive single-precision API: separate handles/views preserve every ABI-1
+ * double API. Model conversion is one-time; evaluation arithmetic is f32.
+ * Static integer-index views are exactly represented floats (checked on import).
+ * Ownership/thread rules are the same as the double APIs above. */
+typedef struct AnnyModelF32 AnnyModelF32;
+typedef struct AnnyOutputF32 AnnyOutputF32;
+typedef struct AnnySessionF32 AnnySessionF32;
+typedef struct { const float *data; size_t len; const size_t *shape; size_t rank; uint32_t kind; } AnnyTensorViewF32;
+int32_t anny_model_to_f32(const AnnyModel *source,AnnyModelF32 **out);
+int32_t anny_model_f32_from_bytes(const uint8_t *bytes,size_t len,const char *config_json,AnnyModelF32 **out);
+int32_t anny_model_f32_evaluate(const AnnyModelF32 *model,const char *parameters_json,AnnyOutputF32 **out);
+int32_t anny_model_f32_tensor(const AnnyModelF32 *model,const char *name,AnnyTensorViewF32 *out);
+int32_t anny_output_f32_tensor(const AnnyOutputF32 *output,const char *name,AnnyTensorViewF32 *out);
+int32_t anny_model_f32_prepared_bytes(const AnnyModelF32 *model,AnnyBytes **out);
+int32_t anny_session_f32_new(const AnnyModelF32 *model,const char *parameters_json,AnnySessionF32 **out);
+int32_t anny_session_f32_update(AnnySessionF32 *session,const char *pose_json);
+int32_t anny_session_f32_tensor(const AnnySessionF32 *session,const char *name,AnnyTensorViewF32 *out);
+int32_t anny_session_f32_coefficients(const AnnySessionF32 *session,AnnyTensorViewF32 *out);
+void anny_session_f32_free(AnnySessionF32 *session);
+void anny_model_f32_free(AnnyModelF32 *model);
+void anny_output_f32_free(AnnyOutputF32 *output);
+/* Standalone base-glTF authoring, no model handle required. Inputs are borrowed
+ * for the call. On error outputs are null; error text uses anny_last_error(). */
+int32_t anny_gltf_edit(const uint8_t *bytes, size_t len,
+    const char *operations_json, AnnyBytes **out);
+int32_t anny_gltf_query(const uint8_t *bytes, size_t len,
+    const char *request_json, char **out);
+
 #ifdef __cplusplus
 }
 #endif

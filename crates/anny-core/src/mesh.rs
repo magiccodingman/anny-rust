@@ -518,10 +518,19 @@ impl MeshBvh {
         let mut b = Self {
             vertices: vertices.data.chunks_exact(3).map(vec3).collect(),
             faces: ids.chunks_exact(3).map(|x| [x[0], x[1], x[2]]).collect(),
-            order: (0..faces.shape[0]).collect(),
+            order: Vec::new(),
             nodes: Vec::new(),
         };
-        b.build(0, b.order.len());
+        let mut order: Vec<usize> = (0..faces.shape[0]).collect();
+        b.nodes = build_subtree(
+            &mut order,
+            &b.vertices,
+            &b.faces,
+            0,
+            0,
+            crate::parallel::worker_threads(2) > 1,
+        );
+        b.order = order;
         Ok(b)
     }
     /// Warp-compatible CPU SAH construction for projection tie ordering.
@@ -658,49 +667,6 @@ impl MeshBvh {
         self.nodes[id].right = right;
         id
     }
-    fn bounds(&self, start: usize, end: usize) -> (Vec3, Vec3) {
-        let mut lo = Vec3::repeat(f64::INFINITY);
-        let mut hi = Vec3::repeat(f64::NEG_INFINITY);
-        for &f in &self.order[start..end] {
-            for &v in &self.faces[f] {
-                for k in 0..3 {
-                    lo[k] = lo[k].min(self.vertices[v][k]);
-                    hi[k] = hi[k].max(self.vertices[v][k]);
-                }
-            }
-        }
-        (lo, hi)
-    }
-    fn build(&mut self, start: usize, end: usize) -> usize {
-        let (lo, hi) = self.bounds(start, end);
-        let id = self.nodes.len();
-        self.nodes.push(BvhNode {
-            lo,
-            hi,
-            left: usize::MAX,
-            right: usize::MAX,
-            start,
-            end,
-        });
-        if end - start > 8 {
-            let extent = hi - lo;
-            let axis = (0..3)
-                .max_by(|&a, &b| extent[a].total_cmp(&extent[b]))
-                .unwrap();
-            let verts = &self.vertices;
-            let faces = &self.faces;
-            self.order[start..end].sort_unstable_by(|&a, &b| {
-                let center = |f: usize| faces[f].iter().map(|&i| verts[i][axis]).sum::<f64>();
-                center(a).total_cmp(&center(b)).then(a.cmp(&b))
-            });
-            let mid = (start + end) / 2;
-            let l = self.build(start, mid);
-            let r = self.build(mid, end);
-            self.nodes[id].left = l;
-            self.nodes[id].right = r;
-        }
-        id
-    }
     fn box_distance(node: &BvhNode, p: Vec3) -> f64 {
         (0..3)
             .map(|i| {
@@ -833,5 +799,227 @@ impl MeshBvh {
             }
         }
         result
+    }
+
+    /// Same traversal as [`Self::overlapping_faces`], writing into caller-owned buffers.
+    ///
+    /// The collision search runs one query per face — 27,420 of them on the committed model — and
+    /// each call allocated a traversal stack and a result vector, so this removes ~55k allocations
+    /// per call. The candidate set is identical to `overlapping_faces`; the order is the same
+    /// traversal order, which the caller sorts anyway.
+    pub fn overlapping_faces_into(
+        &self,
+        lo: Vec3,
+        hi: Vec3,
+        stack: &mut Vec<usize>,
+        out: &mut Vec<usize>,
+    ) {
+        stack.clear();
+        out.clear();
+        stack.push(0);
+        while let Some(i) = stack.pop() {
+            let node = &self.nodes[i];
+            if (0..3).any(|k| node.hi[k] < lo[k] || node.lo[k] > hi[k]) {
+                continue;
+            }
+            if node.left == usize::MAX {
+                out.extend_from_slice(&self.order[node.start..node.end]);
+            } else {
+                stack.push(node.left);
+                stack.push(node.right);
+            }
+        }
+    }
+}
+
+/// Faces below this many are split on the calling thread: handing so few of them to another thread
+/// costs more than the split itself.
+const PARALLEL_BUILD_MIN_FACES: usize = 512;
+
+/// How many levels of the recursion may start threads, so a build starts at most `2^n - 1` of them
+/// — about one per core, where the leaves of that fan-out are still ~800 faces of work each.
+const PARALLEL_BUILD_DEPTH: usize = 4;
+
+fn subtree_bounds(order: &[usize], vertices: &[Vec3], faces: &[[usize; 3]]) -> (Vec3, Vec3) {
+    let mut lo = Vec3::repeat(f64::INFINITY);
+    let mut hi = Vec3::repeat(f64::NEG_INFINITY);
+    for &f in order {
+        for &v in &faces[f] {
+            for k in 0..3 {
+                lo[k] = lo[k].min(vertices[v][k]);
+                hi[k] = hi[k].max(vertices[v][k]);
+            }
+        }
+    }
+    (lo, hi)
+}
+
+/// Move a spliced subtree's child indices into their place in the parent's vector.
+fn rebase(node: &mut BvhNode, by: usize) {
+    if node.left != usize::MAX {
+        node.left += by;
+    }
+    if node.right != usize::MAX {
+        node.right += by;
+    }
+}
+
+/// Build one subtree and return its nodes, the root first, every index relative to that vector.
+///
+/// The sequential builder pushed a node, then its whole left subtree, then its whole right subtree,
+/// so a subtree is spliced back in as parent + left + right and the node vector that comes out holds
+/// exactly the indices that builder produced — the same tree, the same `order` array, the same
+/// traversal, node for node. That is what makes this safe to parallelize: threads change who does
+/// the arithmetic, never the result, so no digest has to be re-blessed to accept it.
+///
+/// `base` is the absolute index of `order[0]` within the full face order, which is what the ranges
+/// the traversal reads (`start`/`end`, on leaves and interior nodes alike) are expressed in.
+fn build_subtree(
+    order: &mut [usize],
+    vertices: &[Vec3],
+    faces: &[[usize; 3]],
+    base: usize,
+    depth: usize,
+    threads: bool,
+) -> Vec<BvhNode> {
+    let (lo, hi) = subtree_bounds(order, vertices, faces);
+    let (start, end) = (base, base + order.len());
+    if order.len() <= 8 {
+        return vec![BvhNode {
+            lo,
+            hi,
+            left: usize::MAX,
+            right: usize::MAX,
+            start,
+            end,
+        }];
+    }
+    let extent = hi - lo;
+    let axis = (0..3)
+        .max_by(|&a, &b| extent[a].total_cmp(&extent[b]))
+        .unwrap();
+    // The key is computed once per face and then sorted on, instead of being recomputed
+    // inside the comparator: that recomputation was three vertex reads plus a sum on every
+    // comparison, so each level paid O(n log n) of it rather than O(n). Keys precede faces in
+    // the tuple and ties still break on the face id, so the comparison order — and therefore
+    // the tree and its traversal order — is exactly what it was.
+    let mut keys: Vec<(f64, usize)> = order
+        .iter()
+        .map(|&f| (faces[f].iter().map(|&i| vertices[i][axis]).sum::<f64>(), f))
+        .collect();
+    keys.sort_unstable_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+    for (slot, &(_, face)) in order.iter_mut().zip(&keys) {
+        *slot = face;
+    }
+    let len = order.len();
+    let mid = len / 2;
+    let (left_order, right_order) = order.split_at_mut(mid);
+    let split_here = threads && depth < PARALLEL_BUILD_DEPTH && len >= PARALLEL_BUILD_MIN_FACES;
+    let (left_nodes, right_nodes) = if split_here {
+        std::thread::scope(|scope| {
+            let left = scope.spawn(move || {
+                build_subtree(left_order, vertices, faces, base, depth + 1, threads)
+            });
+            let right_nodes =
+                build_subtree(right_order, vertices, faces, base + mid, depth + 1, threads);
+            (
+                left.join().expect("BVH subtree build panicked"),
+                right_nodes,
+            )
+        })
+    } else {
+        (
+            build_subtree(left_order, vertices, faces, base, depth + 1, threads),
+            build_subtree(right_order, vertices, faces, base + mid, depth + 1, threads),
+        )
+    };
+    let left_len = left_nodes.len();
+    let mut nodes = Vec::with_capacity(1 + left_len + right_nodes.len());
+    nodes.push(BvhNode {
+        lo,
+        hi,
+        left: 1,
+        right: 1 + left_len,
+        start,
+        end,
+    });
+    nodes.extend(left_nodes);
+    nodes.extend(right_nodes);
+    for node in &mut nodes[1..1 + left_len] {
+        rebase(node, 1);
+    }
+    for node in &mut nodes[1 + left_len..] {
+        rebase(node, 1 + left_len);
+    }
+    nodes
+}
+
+#[cfg(test)]
+mod build_tests {
+    use super::*;
+
+    /// A deterministic wavy grid, big enough that the build reaches its parallel levels.
+    fn grid(side: usize) -> (Tensor, Tensor) {
+        let mut vertices = Vec::new();
+        for y in 0..side {
+            for x in 0..side {
+                let (x, y) = (x as f64, y as f64);
+                vertices.extend_from_slice(&[x, y, (x * 0.3).sin() * (y * 0.2).cos()]);
+            }
+        }
+        let mut faces = Vec::new();
+        for y in 0..side - 1 {
+            for x in 0..side - 1 {
+                let i = (y * side + x) as f64;
+                let (b, c, d) = (i + 1.0, i + side as f64, i + side as f64 + 1.0);
+                faces.extend_from_slice(&[i, b, c, i, c, d]);
+            }
+        }
+        let count = faces.len() / 3;
+        (
+            Tensor::new(vec![side * side, 3], vertices).unwrap(),
+            Tensor::new(vec![count, 3], faces).unwrap(),
+        )
+    }
+
+    /// The parallel build only moves work onto other threads, so it has to produce the same nodes, in
+    /// the same order, with the same indices as the sequential one: the traversal order — and with it
+    /// the collision digest — must not move with the machine's core count.
+    #[test]
+    fn the_parallel_build_produces_the_sequential_tree() {
+        let (vertices, faces) = grid(64);
+        let bvh = MeshBvh::new(&vertices, &faces).unwrap();
+        assert!(
+            bvh.faces.len() > PARALLEL_BUILD_MIN_FACES,
+            "this fixture has to reach the parallel levels"
+        );
+
+        let mut sequential_order = (0..bvh.faces.len()).collect::<Vec<_>>();
+        let sequential = build_subtree(
+            &mut sequential_order,
+            &bvh.vertices,
+            &bvh.faces,
+            0,
+            0,
+            false,
+        );
+        let mut threaded_order = (0..bvh.faces.len()).collect::<Vec<_>>();
+        let threaded = build_subtree(&mut threaded_order, &bvh.vertices, &bvh.faces, 0, 0, true);
+
+        assert_eq!(sequential_order, threaded_order, "the partition differs");
+        assert_eq!(sequential.len(), threaded.len(), "the node count differs");
+        for (a, b) in sequential.iter().zip(&threaded) {
+            assert_eq!(
+                (a.left, a.right, a.start, a.end),
+                (b.left, b.right, b.start, b.end),
+                "a node is laid out or linked differently"
+            );
+            assert_eq!((a.lo, a.hi), (b.lo, b.hi), "a node covers a different box");
+        }
+        assert_eq!(
+            threaded.len(),
+            bvh.nodes.len(),
+            "`new` has to build through this same path"
+        );
     }
 }

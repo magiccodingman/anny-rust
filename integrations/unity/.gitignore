@@ -1,0 +1,27 @@
+# Unity generates these inside the host project; only Assets, Packages and ProjectSettings
+# describe the project and belong in version control.
+project/Library/
+project/Temp/
+project/Obj/
+project/Logs/
+project/UserSettings/
+project/Build/
+project/Builds/
+project/*.csproj
+project/*.sln
+project/*.user
+project/*.unityproj
+project/*.pidb
+project/*.booproj
+project/*.svd
+
+# Native build output staged by tools/build-native.sh is intentionally committed under
+# Plugins/, so it is not ignored here.
+player-mono/
+player-il2cpp/
+player-webgl/
+
+# The WebGL plugin archive and its exception shim do not link against Unity's WebGL main module.
+# See docs/UNITY_WEBGL.md; the files stay on disk but must not be committed until that is resolved.
+package/Plugins/WebGL/
+package/Plugins/WebGL.meta

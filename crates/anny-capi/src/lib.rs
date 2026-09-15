@@ -1,18 +1,29 @@
 //! Stable C ABI. Pointer ownership and lifetimes are specified in include/anny.h.
 //! No Rust containers, exceptions, or Rust ABI symbols cross this boundary.
-use anny_core::{assets::AssetStore, Anny, AnnyConfig, ModelOutput, Parameters, Tensor};
+use anny_core::{
+    assets::AssetStore, Anny, AnnyConfig, ModelOutput, Parameters, PoseSession, Tensor,
+};
 use std::{
     cell::RefCell,
     ffi::{c_char, CStr, CString},
     panic::{catch_unwind, AssertUnwindSafe},
     ptr,
+    sync::Arc,
 };
 
 pub struct AnnyModel {
-    model: Anny,
+    model: Arc<Anny>,
 }
 pub struct AnnyOutput {
     output: ModelOutput,
+}
+/// A reusable pose session over a model; see `anny_session_new`.
+pub struct AnnySession {
+    // SAFETY INVARIANT: Rust drops fields in declaration order. `session` contains the widened
+    // reference, so it must be destroyed before `_model` releases the Arc allocation it borrows.
+    session: PoseSession<'static>,
+    /// Keeps the allocation the session evaluates against alive until after `session` is dropped.
+    _model: Arc<Anny>,
 }
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -116,7 +127,7 @@ pub unsafe extern "C" fn anny_model_from_bytes(
         let m =
             Anny::from_bytes(data, unsafe { config(config_json)? }).map_err(|e| e.to_string())?;
         unsafe {
-            *out = Box::into_raw(Box::new(AnnyModel { model: m }));
+            *out = Box::into_raw(Box::new(AnnyModel { model: Arc::new(m) }));
         }
         Ok(())
     })
@@ -140,7 +151,7 @@ pub unsafe extern "C" fn anny_model_load(
         let m = Anny::load(unsafe { text(path)? }, unsafe { config(config_json)? })
             .map_err(|e| e.to_string())?;
         unsafe {
-            *out = Box::into_raw(Box::new(AnnyModel { model: m }));
+            *out = Box::into_raw(Box::new(AnnyModel { model: Arc::new(m) }));
         }
         Ok(())
     })
@@ -166,7 +177,7 @@ pub unsafe extern "C" fn anny_model_build(
             .build(&c)
             .map_err(|e| e.to_string())?;
         unsafe {
-            *out = Box::into_raw(Box::new(AnnyModel { model: m }));
+            *out = Box::into_raw(Box::new(AnnyModel { model: Arc::new(m) }));
         }
         Ok(())
     })
@@ -431,7 +442,9 @@ pub unsafe extern "C" fn anny_model_transform(
         let model = anny_core::transforms::apply_pipeline(&m.model, &operations)
             .map_err(|e| e.to_string())?;
         unsafe {
-            *out = Box::into_raw(Box::new(AnnyModel { model }));
+            *out = Box::into_raw(Box::new(AnnyModel {
+                model: Arc::new(model),
+            }));
         }
         Ok(())
     })
@@ -536,7 +549,7 @@ pub unsafe extern "C" fn anny_model_build_cached(
             .map_err(|e| e.to_string())?;
         unsafe {
             *out = Box::into_raw(Box::new(AnnyModel {
-                model: result.model,
+                model: Arc::new(result.model),
             }));
         }
         Ok(())
@@ -547,6 +560,131 @@ pub unsafe extern "C" fn anny_model_build_cached(
 #[path = "../../anny-core/tests/common/mod.rs"]
 mod fixture;
 
+/// Create a reusable pose session for repeated re-posing with a fixed phenotype/local-change/facial
+/// selection: those coefficients and the rest model are evaluated once here, and each later
+/// `anny_session_update` pays only for the pose-dependent half (roughly half of
+/// `anny_model_evaluate`). The session holds its own reference to the model, so the model handle may
+/// be freed before the session.
+/// # Safety
+/// model is a live handle or null; parameters is null (defaults) or a valid NUL-terminated UTF-8
+/// JSON string; out points to writable handle storage.
+#[no_mangle]
+pub unsafe extern "C" fn anny_session_new(
+    model: *const AnnyModel,
+    parameters: *const c_char,
+    out: *mut *mut AnnySession,
+) -> i32 {
+    guard(|| {
+        if out.is_null() {
+            return Err("null session handle".into());
+        }
+        unsafe {
+            *out = ptr::null_mut();
+        }
+        let m = unsafe { model.as_ref() }.ok_or("null model")?;
+        let p = if parameters.is_null() {
+            Parameters::default()
+        } else {
+            serde_json::from_str(unsafe { text(parameters)? }).map_err(|e| e.to_string())?
+        };
+        let owner = Arc::clone(&m.model);
+        // The session evaluates through a reference into `owner`'s allocation: `owner` is kept in the
+        // session so the allocation outlives it, and a model is immutable after construction, so
+        // widening the borrow to 'static is sound.
+        let model_ref: &'static Anny = unsafe { &*Arc::as_ptr(&owner) };
+        let session = model_ref.pose_session(&p).map_err(|e| e.to_string())?;
+        unsafe {
+            *out = Box::into_raw(Box::new(AnnySession {
+                _model: owner,
+                session,
+            }));
+        }
+        Ok(())
+    })
+}
+/// Re-pose the session, reusing the coefficients and rest model it was created with.
+/// # Safety
+/// session is a live handle; pose_json is null (the zero pose) or a valid NUL-terminated UTF-8 JSON
+/// pose document, the same object `anny_model_evaluate` takes in `pose_parameters`. Tensor views
+/// taken from the session before this call are invalid afterwards.
+#[no_mangle]
+pub unsafe extern "C" fn anny_session_update(
+    session: *mut AnnySession,
+    pose_json: *const c_char,
+) -> i32 {
+    guard(|| {
+        let s = unsafe { session.as_mut() }.ok_or("null session")?;
+        let pose = if pose_json.is_null() {
+            serde_json::Value::Null
+        } else {
+            serde_json::from_str(unsafe { text(pose_json)? }).map_err(|e| e.to_string())?
+        };
+        s.session.update(&pose).map_err(|e| e.to_string())?;
+        Ok(())
+    })
+}
+/// Read one array of the session's current result.
+/// # Safety
+/// session/name are valid live pointers; out points to writable view storage. Returned data is
+/// read-only and borrowed until the session is freed or updated again.
+#[no_mangle]
+pub unsafe extern "C" fn anny_session_tensor(
+    session: *const AnnySession,
+    name: *const c_char,
+    out: *mut AnnyTensorView,
+) -> i32 {
+    guard(|| {
+        if out.is_null() {
+            return Err("null view".into());
+        }
+        unsafe {
+            *out = AnnyTensorView::default();
+        }
+        let s = unsafe { session.as_ref() }.ok_or("null session")?;
+        let tensor = s
+            .session
+            .output()
+            .get(unsafe { text(name)? })
+            .map_err(|e| e.to_string())?;
+        unsafe {
+            *out = view(tensor);
+        }
+        Ok(())
+    })
+}
+/// Read the coefficients the session was created with.
+/// # Safety
+/// session is a valid live pointer; out points to writable view storage. Returned data is read-only
+/// and borrowed until the session is freed.
+#[no_mangle]
+pub unsafe extern "C" fn anny_session_coefficients(
+    session: *const AnnySession,
+    out: *mut AnnyTensorView,
+) -> i32 {
+    guard(|| {
+        if out.is_null() {
+            return Err("null view".into());
+        }
+        unsafe {
+            *out = AnnyTensorView::default();
+        }
+        let s = unsafe { session.as_ref() }.ok_or("null session")?;
+        unsafe {
+            *out = view(s.session.coefficients());
+        }
+        Ok(())
+    })
+}
+/// # Safety
+/// session is null or a live handle, freed exactly once, with no concurrent use.
+#[no_mangle]
+pub unsafe extern "C" fn anny_session_free(session: *mut AnnySession) {
+    if !session.is_null() {
+        unsafe {
+            drop(Box::from_raw(session));
+        }
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -582,7 +720,7 @@ mod tests {
     #[test]
     fn secondary_ownership_and_prepared_roundtrip() {
         let model = Box::into_raw(Box::new(AnnyModel {
-            model: fixture::tiny(),
+            model: Arc::new(fixture::tiny()),
         }));
         let request = CString::new(r#"{"operation":"pose-convert","mode":"world"}"#).unwrap();
         let mut result = ptr::null_mut();
@@ -622,6 +760,245 @@ mod tests {
             anny_bytes_free(bytes);
             anny_model_free(modified);
             anny_model_free(copy);
+            anny_model_free(model);
+        }
+    }
+}
+
+pub mod single;
+
+/// Edit self-contained glTF/GLB bytes using gltf_asset::GltfEdit JSON. No model
+/// handle is needed. Free the independent result with anny_bytes_free.
+/// # Safety
+/// bytes covers len readable bytes; operations_json is NUL-terminated UTF-8;
+/// out points to writable, nonaliased handle storage.
+#[no_mangle]
+pub unsafe extern "C" fn anny_gltf_edit(
+    bytes: *const u8,
+    len: usize,
+    operations_json: *const c_char,
+    out: *mut *mut AnnyBytes,
+) -> i32 {
+    guard(|| {
+        if out.is_null() {
+            return Err("null bytes output".into());
+        }
+        unsafe {
+            *out = ptr::null_mut();
+        }
+        if bytes.is_null() || len == 0 || len > 512 * 1024 * 1024 {
+            return Err("invalid glTF byte buffer".into());
+        }
+        let input = unsafe { std::slice::from_raw_parts(bytes, len) };
+        let result = anny_core::gltf_asset::edit_glb(input, unsafe { text(operations_json)? })
+            .map_err(|e| e.to_string())?;
+        unsafe {
+            *out = Box::into_raw(Box::new(AnnyBytes { bytes: result }));
+        }
+        Ok(())
+    })
+}
+/// Query self-contained glTF/GLB bytes; free returned UTF-8 with anny_string_free.
+/// # Safety
+/// bytes covers len readable bytes, request_json is NUL-terminated UTF-8 and
+/// out points to writable, nonaliased pointer storage.
+#[no_mangle]
+pub unsafe extern "C" fn anny_gltf_query(
+    bytes: *const u8,
+    len: usize,
+    request_json: *const c_char,
+    out: *mut *mut c_char,
+) -> i32 {
+    guard(|| {
+        if out.is_null() {
+            return Err("null text output".into());
+        }
+        unsafe {
+            *out = ptr::null_mut();
+        }
+        if bytes.is_null() || len == 0 || len > 512 * 1024 * 1024 {
+            return Err("invalid glTF byte buffer".into());
+        }
+        let input = unsafe { std::slice::from_raw_parts(bytes, len) };
+        let result = anny_core::gltf_asset::query_glb(input, unsafe { text(request_json)? })
+            .map_err(|e| e.to_string())?;
+        let result = CString::new(result).map_err(|e| e.to_string())?;
+        unsafe {
+            *out = result.into_raw();
+        }
+        Ok(())
+    })
+}
+
+#[cfg(test)]
+mod gltf_tests {
+    use super::*;
+    #[test]
+    fn standalone_gltf_bytes_and_text_are_owned_and_failures_clear_outputs() {
+        let mut scene = anny_core::scene::Scene::new();
+        scene
+            .add_character(&fixture::tiny(), &Default::default(), &Default::default())
+            .unwrap();
+        let input = scene.to_glb().unwrap();
+        let operations = CString::new("[]").unwrap();
+        let request = CString::new(r#"{"operation":"describe"}"#).unwrap();
+        let mut bytes = ptr::null_mut();
+        assert_eq!(
+            unsafe { anny_gltf_edit(input.as_ptr(), input.len(), operations.as_ptr(), &mut bytes) },
+            0
+        );
+        drop(input);
+        let mut text = ptr::null_mut();
+        assert_eq!(
+            unsafe {
+                anny_gltf_query(
+                    anny_bytes_data(bytes),
+                    anny_bytes_len(bytes),
+                    request.as_ptr(),
+                    &mut text,
+                )
+            },
+            0
+        );
+        unsafe {
+            anny_bytes_free(bytes);
+        }
+        assert!(unsafe { CStr::from_ptr(text) }
+            .to_str()
+            .unwrap()
+            .contains("meshes"));
+        unsafe {
+            anny_string_free(text);
+        }
+        bytes = ptr::dangling_mut();
+        assert_ne!(
+            unsafe { anny_gltf_edit(ptr::null(), 0, operations.as_ptr(), &mut bytes) },
+            0
+        );
+        assert!(bytes.is_null());
+    }
+}
+
+#[cfg(test)]
+mod session_tests {
+    use super::*;
+    /// Compare every array of a session against the arrays of an output handle, name by name.
+    fn assert_same_session(
+        session: *const AnnySession,
+        output: *const AnnyOutput,
+        names: &[String],
+    ) {
+        for name in names {
+            let cname = CString::new(name.as_str()).unwrap();
+            let mut a = AnnyTensorView::default();
+            let mut b = AnnyTensorView::default();
+            assert_eq!(
+                unsafe { anny_session_tensor(session, cname.as_ptr(), &mut a) },
+                0,
+                "session tensor {name}"
+            );
+            assert_eq!(
+                unsafe { anny_output_tensor(output, cname.as_ptr(), &mut b) },
+                0,
+                "output tensor {name}"
+            );
+            assert_eq!(a.len, b.len, "{name} length");
+            assert_eq!(a.rank, b.rank, "{name} rank");
+            let left_shape = unsafe { std::slice::from_raw_parts(a.shape, a.rank) };
+            let right_shape = unsafe { std::slice::from_raw_parts(b.shape, b.rank) };
+            assert_eq!(left_shape, right_shape, "{name} shape");
+            assert_eq!(a.kind, b.kind, "{name} kind");
+            let left = unsafe { std::slice::from_raw_parts(a.data, a.len) };
+            let right = unsafe { std::slice::from_raw_parts(b.data, b.len) };
+            assert_eq!(left, right, "{name} data");
+        }
+    }
+    #[test]
+    fn session_matches_evaluate_and_outlives_the_model_handle() {
+        // Names come from the core so every array the model produces is compared, not a sample.
+        let reference = fixture::tiny().forward(&Parameters::default()).unwrap();
+        let names: Vec<String> = reference.arrays.keys().cloned().collect();
+        assert!(!names.is_empty());
+        let model = Box::into_raw(Box::new(AnnyModel {
+            model: Arc::new(fixture::tiny()),
+        }));
+        let mut output = ptr::null_mut();
+        assert_eq!(
+            unsafe { anny_model_evaluate(model, ptr::null(), &mut output) },
+            0
+        );
+        let mut session = ptr::null_mut();
+        assert_eq!(
+            unsafe { anny_session_new(model, ptr::null(), &mut session) },
+            0
+        );
+        // Before any update the session exposes the rest model, like a null-pose forward.
+        assert_eq!(unsafe { anny_session_update(session, ptr::null()) }, 0);
+        assert_same_session(session, output, &names);
+        // The session holds its own reference, so freeing the caller's handle must not matter.
+        unsafe {
+            anny_model_free(model);
+        }
+        assert_eq!(unsafe { anny_session_update(session, ptr::null()) }, 0);
+        assert_same_session(session, output, &names);
+        let mut coefficients = AnnyTensorView::default();
+        assert_eq!(
+            unsafe { anny_session_coefficients(session, &mut coefficients) },
+            0
+        );
+        assert!(coefficients.len > 0);
+        unsafe {
+            anny_session_free(session);
+            anny_output_free(output);
+        }
+    }
+    #[test]
+    fn session_rejects_bad_input_and_stays_usable() {
+        let model = Box::into_raw(Box::new(AnnyModel {
+            model: Arc::new(fixture::tiny()),
+        }));
+        let mut session = ptr::null_mut();
+        assert_eq!(
+            unsafe { anny_session_new(model, ptr::null(), &mut session) },
+            0
+        );
+        let mut view = AnnyTensorView::default();
+        let name = CString::new("vertices").unwrap();
+        // A pose the model cannot satisfy is refused, and leaves the session alone.
+        let bad = CString::new(r#"{"root":[[0,0,0]]}"#).unwrap();
+        assert_eq!(unsafe { anny_session_update(session, bad.as_ptr()) }, 1);
+        assert!(!anny_last_error().is_null());
+        assert_eq!(unsafe { anny_session_update(session, ptr::null()) }, 0);
+        assert_eq!(
+            unsafe { anny_session_tensor(session, name.as_ptr(), &mut view) },
+            0
+        );
+        // Null handles and malformed documents are errors, never aborts.
+        assert_eq!(
+            unsafe { anny_session_update(ptr::null_mut(), ptr::null()) },
+            1
+        );
+        assert_eq!(
+            unsafe { anny_session_tensor(ptr::null(), name.as_ptr(), &mut view) },
+            1
+        );
+        let mut scratch = ptr::null_mut();
+        assert_eq!(
+            unsafe { anny_session_new(model, ptr::null(), &mut scratch) },
+            0
+        );
+        assert_eq!(
+            unsafe { anny_session_new(ptr::null(), ptr::null(), &mut scratch) },
+            1
+        );
+        assert!(scratch.is_null());
+        assert_eq!(
+            unsafe { anny_session_new(model, ptr::null(), ptr::null_mut()) },
+            1
+        );
+        unsafe {
+            anny_session_free(session);
+            anny_session_free(ptr::null_mut());
             anny_model_free(model);
         }
     }
