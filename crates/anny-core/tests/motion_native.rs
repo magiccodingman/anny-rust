@@ -183,12 +183,42 @@ fn clips_resample_transfer_and_export_in_both_precisions() {
             assert!((a - b).abs() < 1e-9);
         }
     }
-    for mode in [Precision::F32, Precision::F64] {
-        let glb = interp.to_scene(&model, mode).unwrap().to_glb().unwrap();
+    // Both precisions must export the same motion, and the motion must actually move. A session that
+    // never applied its per-frame pose would still produce one animation of the right shape, so the
+    // values are what has to be asserted, not the document structure.
+    let scenes: Vec<anny_core::scene::Scene> = [Precision::F32, Precision::F64]
+        .into_iter()
+        .map(|mode| interp.to_scene(&model, mode).unwrap())
+        .collect();
+    for scene in &scenes {
+        assert_eq!(scene.animations.len(), 1);
+        let animation = &scene.animations[0];
+        assert_eq!(animation.times.len(), interp.frames.len());
+        assert_eq!(animation.bone_poses.len(), interp.frames.len());
+        assert_ne!(
+            animation.bone_poses[0], animation.bone_poses[1],
+            "the exported animation does not move between frames"
+        );
+        let glb = scene.to_glb().unwrap();
         assert_eq!(&glb[..4], b"glTF");
         let len = u32::from_le_bytes(glb[12..16].try_into().unwrap()) as usize;
         let doc: serde_json::Value = serde_json::from_slice(&glb[20..20 + len]).unwrap();
         assert_eq!(doc["animations"].as_array().unwrap().len(), 1);
+    }
+    for (single_pose, double_pose) in scenes[0].animations[0]
+        .bone_poses
+        .iter()
+        .zip(&scenes[1].animations[0].bone_poses)
+    {
+        assert_eq!(single_pose.len(), double_pose.len());
+        for (single, double) in single_pose.iter().zip(double_pose) {
+            for (single, double) in single.iter().zip(double.iter()) {
+                assert!(
+                    (single - double).abs() < 1e-6,
+                    "the f32 export disagrees with the f64 one"
+                );
+            }
+        }
     }
     let request = json!({"operation":"motion-resample","clip":clip,"fps":2.});
     assert_eq!(
