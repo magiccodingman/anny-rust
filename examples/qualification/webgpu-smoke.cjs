@@ -88,6 +88,20 @@ const PROBE = async ({ moduleUrl, modelUrl, batch }) => {
   const t2 = performance.now();
   const again = await mod.gpu_blendshapes(bytes, coefficients, batch);
   const warmMs = performance.now() - t2;
+  // Malformed caller input has to arrive as an ordinary JS error. A rust panic or a trap reaches
+  // the page as `RuntimeError: unreachable`, which is exactly what these checks exist to catch.
+  const rejection = async (fn) => {
+    try {
+      await fn();
+      return { threw: false, clean: false, message: 'no error' };
+    } catch (error) {
+      const message = String((error && error.message) || error);
+      return { threw: true, clean: !/unreachable|RuntimeError|out of bounds/i.test(message), message };
+    }
+  };
+  const shortCoefficients = coefficients.slice(0, Math.max(0, coefficients.length - 3));
+  const malformedShort = await rejection(() => mod.gpu_blendshapes(bytes, shortCoefficients, batch));
+  const malformedBatch = await rejection(() => mod.gpu_blendshapes(bytes, coefficients, 0));
   return {
     navigatorGpu: !!navigator.gpu,
     exports,
@@ -105,6 +119,8 @@ const PROBE = async ({ moduleUrl, modelUrl, batch }) => {
     adapter: mod.gpu_adapter_name(),
     cpuSum: cpu.slice(0, 1024).reduce((a, v) => a + v, 0),
     gpuSum: gpu.slice(0, 1024).reduce((a, v) => a + v, 0),
+    malformedShort,
+    malformedBatch,
   };
 };
 
@@ -194,6 +210,13 @@ async function main() {
     ok: probe.lengths.again === probe.lengths.cpu && probe.second.worst <= 1e-5,
     worst: probe.second.worst,
     warmMs: probe.warmMs,
+  });
+  // The entry points validate caller-supplied dimensions before slicing or dispatching, so a bad
+  // length is a caught error and not a trap: the page keeps running and the checks above still ran.
+  record('malformed-coefficients-error', {
+    ok: probe.malformedShort.clean && probe.malformedBatch.clean,
+    shortRow: probe.malformedShort,
+    zeroBatch: probe.malformedBatch,
   });
   // A missing favicon is the browser asking for a file the page never declares;
   // only real failures count.
