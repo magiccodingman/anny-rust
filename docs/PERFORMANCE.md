@@ -135,8 +135,38 @@ Equivalence evidence, since "same output" is the entire point:
 - The bench rows outside the prepare group are unchanged, so nothing here traded against generation or
   the session path.
 
-### Zero-copy loading: what an mmap path would preserve, and why it is not taken
+### Widening the target CPU: parity-safe, measured, and not worth baking in
 
+The release profile sets `lto = "thin"` and no `target-cpu`, so the shipped binary targets baseline
+x86-64 — SSE2 only. Widening that is the one CPU-level change that cannot move a result: LLVM
+vectorizes floating point this way only without fast-math, which rustc does not enable, so the
+operations and their order are the same and only their width changes. Both widened targets were
+measured on this machine, and both kept every pinned digest byte-identical (114 passed, 0 failed,
+including the prepared-payload, collision, fitting and motion oracles).
+
+| row (min / median ms) | default | `x86-64-v3` | `native` |
+| --- | --- | --- | --- |
+| generate f32 typed lbs | 0.434 / 0.442 | 0.408 / 0.416 | 0.415 / 0.423 |
+| generate f32 typed dqs | 0.923 / 0.932 | 0.874 / 0.907 | 0.954 / 1.039 |
+| generate f32 typed warp_lbs | 0.433 / 0.449 | 0.462 / 0.481 | 0.429 / 0.490 |
+| split rest_model default | 0.311 / 0.337 | 0.292 / 0.302 | 0.275 / 0.282 |
+
+That is roughly 5% on average and mixed in sign — `warp_lbs` regresses under both. So it is not baked
+into the build: it buys little and narrows the CPUs the published binary runs on. It is worth passing
+for a local benchmark (`RUSTFLAGS="-C target-cpu=x86-64-v3"`), and the table above is what to expect.
+
+The more useful result is what this rules out. The kernels are not vectorization-bound, so hand-written
+SIMD would be chasing the wrong bottleneck. Should it ever be attempted anyway, two constraints apply,
+both learned from this code rather than assumed:
+
+* `point()` is nalgebra's `Matrix4 * Vector3`, a summed gemv. A hand-written replacement only stays
+  bit-exact if it accumulates in the same order, so the inner product may not be restructured for
+  lanes without the collision of last bits — the digests would catch it, but the fix is not free.
+* The linear-blend loop skips influences whose weight is exactly zero. A masked SIMD version must
+  *select* rather than add zero: adding `0.0` to a `-0.0` accumulator yields `+0.0`, which is a
+  different bit pattern and a different answer at the digest level.
+
+### Zero-copy loading: what an mmap path would preserve, and why it is not taken
 Loading still copies: `ArchiveF32::from_bytes` deserializes the file and `decode` produces owned
 buffers, so a prepared reload is a pass over the payload (≈25 ms for f32, ≈66 ms for f64) that exists
 only to move bytes out of the file. The obvious alternative is a read-only `mmap` with tensors borrowed
