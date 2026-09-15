@@ -81,8 +81,13 @@ definition:
 AssertionError: invoke_ functions exported but exceptions and longjmp are both disabled
 ```
 
-The archive imports 47 `invoke_*` trampolines (Rust's unwind landing pads). Declaring them in the
+The archive imports 47 distinct `invoke_*` trampoline names (428 undefined references across its
+members; 172 for the `__cxa*`/EH set). Declaring them in the
 `.jslib` does not help: Emscripten then counts them as invoke functions and asserts on the same line.
 They cannot be removed from the archive either, because Rust's std for this target is unwind-only.
 The remaining failure is therefore in Emscripten's JS-glue stage of *Unity's* build, which this
 project cannot configure.
+
+The staged archive is the stable-1.90 build at `sha256 015697c8fa910572...`; the digests of
+`target/wasm32-unknown-emscripten/release/libanny_capi.a` and the staged `Plugins/WebGL/libanny.a`
+are identical, so the measurements above describe the artifact on disk.
