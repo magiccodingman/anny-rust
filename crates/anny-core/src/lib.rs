@@ -11,6 +11,7 @@ pub mod math;
 pub mod mesh;
 pub mod mesh_io;
 pub mod model;
+mod parallel;
 pub mod scene;
 pub mod smpl;
 pub mod tensor;

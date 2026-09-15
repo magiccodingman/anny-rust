@@ -153,9 +153,7 @@ impl Tensor {
         // Each row lands in the same place the sequential loop would have put it, from the same source
         // elements, which keeps the result bit-identical. Small selections stay sequential: the
         // threads cost more than the copy.
-        let threads = std::thread::available_parallelism()
-            .map_or(1, std::num::NonZeroUsize::get)
-            .min(outer);
+        let threads = crate::parallel::worker_threads(outer);
         if threads > 1 && outer * row >= 1 << 20 {
             let width = self.shape[axis];
             let per = outer.div_ceil(threads);
@@ -417,10 +415,11 @@ fn decode_f32_into(dtype: Dtype, element: usize, bytes: &[u8], out: &mut [f32]) 
         decode_f32_chunk(dtype, bytes, out);
         return;
     }
-    let threads = std::thread::available_parallelism()
-        .map_or(1, std::num::NonZeroUsize::get)
-        .min(out.len().div_ceil(PARALLEL_DECODE_ELEMENTS))
-        .max(1);
+    let threads = crate::parallel::worker_threads(out.len().div_ceil(PARALLEL_DECODE_ELEMENTS));
+    if threads == 1 {
+        decode_f32_chunk(dtype, bytes, out);
+        return;
+    }
     let per = out.len().div_ceil(threads);
     std::thread::scope(|scope| {
         for (source, destination) in bytes.chunks(per * element).zip(out.chunks_mut(per)) {
@@ -503,10 +502,11 @@ fn decode_into(dtype: Dtype, element: usize, bytes: &[u8], out: &mut [f64]) {
         decode_chunk(dtype, bytes, out);
         return;
     }
-    let threads = std::thread::available_parallelism()
-        .map_or(1, std::num::NonZeroUsize::get)
-        .min(out.len().div_ceil(PARALLEL_DECODE_ELEMENTS))
-        .max(1);
+    let threads = crate::parallel::worker_threads(out.len().div_ceil(PARALLEL_DECODE_ELEMENTS));
+    if threads == 1 {
+        decode_chunk(dtype, bytes, out);
+        return;
+    }
     let per = out.len().div_ceil(threads);
     std::thread::scope(|scope| {
         for (source, destination) in bytes.chunks(per * element).zip(out.chunks_mut(per)) {

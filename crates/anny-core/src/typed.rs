@@ -273,10 +273,10 @@ fn convert_checked(source: &[f64], out: &mut [f32], discrete: bool) -> (bool, bo
     if out.len() < PARALLEL_CONVERT_ELEMENTS {
         return chunk(source, out, discrete);
     }
-    let threads = std::thread::available_parallelism()
-        .map_or(1, std::num::NonZeroUsize::get)
-        .min(out.len().div_ceil(PARALLEL_CONVERT_ELEMENTS))
-        .max(1);
+    let threads = crate::parallel::worker_threads(out.len().div_ceil(PARALLEL_CONVERT_ELEMENTS));
+    if threads == 1 {
+        return chunk(source, out, discrete);
+    }
     let per = out.len().div_ceil(threads);
     std::thread::scope(|scope| {
         let handles: Vec<_> = source

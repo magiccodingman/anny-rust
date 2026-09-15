@@ -166,7 +166,7 @@
       "exact_index_and_label_checks": true
     }
   ],
-  "native_tests": 16,
+  "native_tests": 111,
   "reference_environment": {
     "python": "3.13.5",
     "torch": "2.10.0+cpu",
@@ -177,6 +177,7 @@
   "cache_reload_passed": true,
   "c_abi_smoke": "ABI 1: 13718 vertices, 27420 faces; pose sessions match evaluate exactly (f64+f32) and survive anny_model_free",
   "wasm_compilation_passed": true,
+  "wasm_node_execution_passed": "pose sessions (f64 and f32) match evaluate exactly and survive their model being freed",
   "browser_execution_tested": false,
   "real_smpl_assets_tested": false
 }

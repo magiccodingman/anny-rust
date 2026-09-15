@@ -64,7 +64,6 @@ impl AnnyModelF32 {
         Ok(js_sys::Uint32Array::from(values.as_slice()))
     }
     /// Start a reusable f32 pose session; see the f64 `AnnySession` for the ownership rules.
-    #[wasm_bindgen(js_name = poseSession)]
     pub fn pose_session(&self, parameters_json: Option<String>) -> Result<AnnySessionF32, JsValue> {
         let parameters: Parameters = parameters_json
             .as_deref()

@@ -758,10 +758,15 @@ fn load_targets(jobs: &[TargetJob], n: usize, vertices: &[f64]) -> Result<Vec<f6
         return Ok(out);
     }
     // Every core the machine offers: the loads are a gzip decode plus a text parse, so they are CPU
-    // bound and a fixed cap just leaves cores idle (halving the cap on a 32-core host cost 1.5x).
-    let threads = std::thread::available_parallelism()
-        .map_or(1, std::num::NonZeroUsize::get)
-        .min(jobs.len());
+    // bound and a fixed cap just leaves cores idle (halving the cap on a 32-core host cost 1.5x). A
+    // browser build cannot create threads at all and takes the loop below.
+    let threads = crate::parallel::worker_threads(jobs.len());
+    if threads == 1 {
+        for (job, slot) in jobs.iter().zip(out.chunks_mut(stride)) {
+            load_job_into(job, slot, vertices)?;
+        }
+        return Ok(out);
+    }
     let per = jobs.len().div_ceil(threads);
     std::thread::scope(|scope| -> Result<()> {
         let mut handles = Vec::new();
@@ -770,13 +775,7 @@ fn load_targets(jobs: &[TargetJob], n: usize, vertices: &[f64]) -> Result<Vec<f6
             let mine = &jobs[start..start + chunk.len() / stride];
             handles.push(scope.spawn(move || -> Result<()> {
                 for (job, slot) in mine.iter().zip(chunk.chunks_mut(stride)) {
-                    load_target_into(&job.path, slot)?;
-                    if job.newborn {
-                        let scale = [0.922, 0.922, 0.75];
-                        for (i, v) in slot.iter_mut().enumerate() {
-                            *v = scale[i % 3] * *v + (scale[i % 3] - 1.) / 3. * vertices[i];
-                        }
-                    }
+                    load_job_into(job, slot, vertices)?;
                 }
                 Ok(())
             }));
@@ -789,6 +788,19 @@ fn load_targets(jobs: &[TargetJob], n: usize, vertices: &[f64]) -> Result<Vec<f6
         Ok(())
     })?;
     Ok(out)
+}
+
+/// Read one selected target into its slice of the prepared tensor, applying the newborn rescale the
+/// sequential loop applied per job.
+fn load_job_into(job: &TargetJob, slot: &mut [f64], vertices: &[f64]) -> Result<()> {
+    load_target_into(&job.path, slot)?;
+    if job.newborn {
+        let scale = [0.922, 0.922, 0.75];
+        for (i, v) in slot.iter_mut().enumerate() {
+            *v = scale[i % 3] * *v + (scale[i % 3] - 1.) / 3. * vertices[i];
+        }
+    }
+    Ok(())
 }
 
 fn combinations(keys: &[&str]) -> Vec<Vec<String>> {

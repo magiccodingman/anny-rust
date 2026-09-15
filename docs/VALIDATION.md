@@ -5,10 +5,15 @@ Local validation against the pinned source, recorded September 13, 2026.
 - `cargo fmt --all -- --check`: passed.
 - `cargo test --workspace`: 96 tests passed, 0 failed (8 of them C ABI, including the pose-session equivalence tests); 15 data-dependent cases are `#[ignore]`d and were run separately against `data/`.
 - `cargo clippy --workspace --all-targets -- -D warnings`: passed.
-- `cargo check -p anny-wasm --target wasm32-unknown-unknown`: passed, including the pose-session classes (browser execution was not re-run here).
+- `cargo build -p anny-wasm --target wasm32-unknown-unknown`: passed, including the pose-session classes.
+- The WebAssembly classes are **executed** under Node (`wasm-bindgen --target nodejs`, then
+  `examples/qualification/wasm-node-smoke.cjs`): f64 and f32 sessions match `evaluate` bit for bit and
+  survive their model being freed. Node is not a browser, so this is not browser verification; it is the
+  first time the wasm bindings ran at all, and it is what found that `std::thread` compiles for wasm32
+  but panics when a thread is created — the parallel helpers now take their sequential path on wasm32.
 - Full-model Python-reference parity: **23/23 passed**, absolute tolerance 1e-6, relative tolerance 0. Integer arrays and labels are exact.
 - Prepared Safetensors model -> native reload -> reference comparison: passed.
-- Real C executables calling ABI 1 generated 13,718 vertices / 27,420 faces from imported assets, and pose sessions matched `evaluate` exactly (f64 and f32), including after the model handle was freed.
+- Real C executables calling ABI 1 generated 13,718 vertices / 27,420 faces from imported assets, and pose sessions matched `evaluate` exactly (f64 and f32), including after the model handle was freed. The .NET example asserts the same for both managed session wrappers.
 - Native two-iteration fitting smoke completed on real default-mesh data; resulting mean vertex error 0.0082489114 m. This is a functional smoke, not optimizer trajectory parity or a convergence benchmark.
 - Native calibrated sampling read the original distributions and generated valid parameters from seed 42.
 
@@ -49,7 +54,8 @@ use `tools/export_reference.py --cases all-cases` in the original Python Anny
 environment, then `tools/check_parity.py`. The lightweight fixture runner fails
 on missing inputs and does not regenerate reference answers with the Rust code.
 
-Not verified here: actual browser execution/performance, real licensed SMPL or
-SMPL-X assets, GPU implementations, exhaustive collision equivalence, or complete
-iterative optimizer equivalence. CI separately checks Windows/macOS builds and
+Not verified here: execution in an actual browser (the WebAssembly classes run under
+Node instead) and browser performance, real licensed SMPL or SMPL-X assets, GPU
+implementations, exhaustive collision equivalence, or complete iterative optimizer
+equivalence. CI separately checks Windows/macOS builds and
 the C# example; a checked-in validation record does not assert future CI results.

@@ -148,6 +148,11 @@ So a whole-file digest is not a usable oracle for this artifact; compare the ten
 hashes instead. Two builds of one configuration differ in header bytes only. The prepared-model cache is
 unaffected: it keys on config plus asset fingerprint and verifies the sha256 it wrote itself.
 
+Every number below was measured on the native x86-64 build (32 hardware threads). The `wasm32` build of
+the same code cannot create threads: `std::thread` compiles there but panics when a thread is actually
+created, so `parallel::worker_threads` reports one worker and every parallel helper takes its sequential
+path. None of the parallel speed-ups in this document apply to a browser build.
+
 ## Current state (post-fix, min / median ms)
 
 | operation | min | median |

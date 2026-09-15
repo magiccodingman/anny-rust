@@ -193,7 +193,6 @@ pub mod single;
 #[wasm_bindgen]
 impl AnnyModel {
     /// Start a reusable pose session for repeated re-posing with fixed non-pose parameters.
-    #[wasm_bindgen(js_name = poseSession)]
     pub fn pose_session(&self, parameters_json: Option<String>) -> Result<AnnySession, JsValue> {
         let parameters: Parameters = parameters_json
             .as_deref()

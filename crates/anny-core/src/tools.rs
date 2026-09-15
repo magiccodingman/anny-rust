@@ -373,10 +373,7 @@ impl SelfInterpenetrationModule {
         // two AABBs are disjoint. Those pairs are reachable only through the leaf-union superset.
         // Upstream's BVH query has the same behaviour, so narrowing the candidate set would trade
         // parity for speed. Reusing the buffers is free of that trade.
-        let threads = std::thread::available_parallelism()
-            .map_or(1, std::num::NonZeroUsize::get)
-            .min(f)
-            .max(1);
+        let threads = crate::parallel::worker_threads(f);
         for (bi, row) in vertices.data.chunks_exact(self.n * 3).enumerate() {
             let v = Tensor::new(vec![self.n, 3], row.to_vec())?;
             let bvh = MeshBvh::new(&v, &self.faces)?;
