@@ -161,3 +161,16 @@ Two failures worth recording because they were found only by running:
 * Skinned mode initially uploaded the *evaluated* vertices into a mesh whose bones then skinned them
   again — a double-skinned character. The mesh must carry the bind-pose geometry: Anny's default
   evaluation is not a bind pose (`bone_poses` differ from `rest_bone_poses` by up to 6.8e-02).
+
+### Unity physics
+
+`AnnyMeshCollider` drives a `MeshCollider` from the generated geometry, and the tests check it against
+the mesh rather than against "a collider exists", because a collider holding stale collision data still
+answers raycasts. A vertical raycast through the generated character agrees with ray/triangle
+intersections computed from the mesh itself: `collider=1.026502 m`, `mesh=1.026502 m`, delta `0` at
+f32 print precision, against a 1e-3 m tolerance. The component is mode-aware on purpose: in Skinned
+mode the mesh carries the bind-pose surface, so the collider is the rest shape and does not follow the
+bones, while in Exact mode the collider follows the evaluated surface and is re-cooked whenever the
+character evaluates (`AnnyCharacter` edits the mesh in place, so the evaluation counter is the staleness
+signal; comparing mesh references would never fire). Mutation-checked: removing the re-cook condition
+fails `ExactModeRefreshesTheColliderWhenThePoseChanges` and nothing else (7/8).

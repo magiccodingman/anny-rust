@@ -135,3 +135,24 @@ ANNY-PLAYER-SMOKE ok vertices=13718 meshverts=82260 tris=27420 bones=104 influen
 The script waits for the editor process to exit between runs. Starting the next run too early lets
 Unity's script compiler backend abort with `Scripts have compiler errors`, which is an
 infrastructure artifact rather than a code error.
+
+## Editor controls
+
+`AnnyCharacterEditor` replaces the default inspector for a character: generate and regenerate from edit
+mode, the phenotype sliders by label (driving `SetPhenotype` + `Apply`, so the sliders use the same path
+a game does), a result box reporting what the mesh builder actually produced — including influences lost
+to the cap, which is the failure mode that produces a plausible-looking character rather than an
+exception — and preset capture/apply.
+
+`AnnyPreset` is an ordinary asset holding mode, precision, sliders and mesh options. The test that matters
+is that applying a captured preset reproduces the source geometry **exactly** (zero tolerance, element-wise
+over 27,436 vertices), and that the preset survives `AssetDatabase` serialization.
+
+`AnnyBakeWindow` (`Anny / Bake prepared payload...`) bakes a prepared payload into ordinary Unity assets
+and reports where they went.
+
+## Physics
+
+`AnnyMeshCollider` points a `MeshCollider` at the character's generated mesh and re-cooks it when the
+geometry changes. In Skinned mode that is the bind-pose surface; in Exact mode it follows the posed
+surface. See `docs/VALIDATION.md` for the measured agreement.

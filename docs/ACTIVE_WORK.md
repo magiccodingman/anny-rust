@@ -55,7 +55,7 @@ Optional future work also includes CUDA/ROCm-specialized backends and qualificat
 
 If further agentic work is performed in a transient browser environment, keep using small ordinary source commits and PR comments as durable handoff. Do not accumulate large local-only deltas. If GitHub writes temporarily fail, retry shortly; if they remain unavailable, stop and involve the owner.
 
-### Unity is integrated, validated in the editor, and now in real players
+### Unity is integrated, validated in the editor, and now in real players, with editor controls and physics
 
 `integrations/unity/` holds UPM package `com.magiccodingman.anny` (native plugin, runtime, editor
 tooling, tests) plus the host project the tests run in. EditMode 21/21 and PlayMode 5/5 pass against
