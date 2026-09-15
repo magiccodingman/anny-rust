@@ -20,7 +20,9 @@ Local validation against the pinned source, recorded September 13, 2026.
   session (`source: session`, 4.9 ms), an exact return to rest, GLB export accepted by the official
   glTF validator (0 errors, skins present, 27,420 triangles), state save/load round trip, seeded
   randomisation that repeats and differs by seed, a texture applied to the material, clip playback, and
-  27,420 triangles actually drawn by the viewport — with no page errors and a clean console.
+  27,420 triangles actually drawn by the viewport — with no page errors and a clean console. Two
+  independent sessions produced identical geometry digests at every stage, so the whole WASM →
+  browser → geometry pipeline is reproducible run to run, not only within a session.
 - The parallel BVH build produces the same tree as the sequential one, node for node
   (`mesh::build_tests::the_parallel_build_produces_the_sequential_tree`), and every real-data digest
   (`collision_native`, `prepared_payload`, `native_import`) is unchanged by it.
