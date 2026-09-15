@@ -185,3 +185,12 @@ bones: pose-sequence bake `worst = 3e-07 m`, phenotype bake `worst = 0 m`, both 
 tolerance. One intermediate failure was a wrong expectation in the test, not a defect: three keyframes
 one frame apart span two frames, so the clip is `(keys - 1) / frameRate` seconds long, which is what the
 bakery already returned.
+
+## Rust gates, re-run after the Unity work (2026-09-15)
+
+`cargo fmt --all -- --check` clean; `cargo test --workspace --locked` 98 passed, 0 failed, 16 ignored
+across 31 suites; `cargo clippy --workspace --all-targets --locked -- -D warnings` clean;
+`cargo check -p anny-wasm --target wasm32-unknown-unknown --locked` clean. No Rust source changed in
+this window (the commits since `214ba09` touch `integrations/unity/`, `docs/` and tooling only), so
+the previously pinned release-mode digests and the 114-test release run still describe this tree. The
+16 ignored tests are the opt-in ones (authoring regeneration and fixtures).
