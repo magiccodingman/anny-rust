@@ -689,10 +689,19 @@ impl MeshBvh {
                 .unwrap();
             let verts = &self.vertices;
             let faces = &self.faces;
-            self.order[start..end].sort_unstable_by(|&a, &b| {
-                let center = |f: usize| faces[f].iter().map(|&i| verts[i][axis]).sum::<f64>();
-                center(a).total_cmp(&center(b)).then(a.cmp(&b))
-            });
+            // The key is computed once per face and then sorted on, instead of being recomputed
+            // inside the comparator: that recomputation was three vertex reads plus a sum on every
+            // comparison, so each level paid O(n log n) of it rather than O(n). Keys precede faces in
+            // the tuple and ties still break on the face id, so the comparison order — and therefore
+            // the tree and its traversal order — is exactly what it was.
+            let mut keys: Vec<(f64, usize)> = self.order[start..end]
+                .iter()
+                .map(|&f| (faces[f].iter().map(|&i| verts[i][axis]).sum::<f64>(), f))
+                .collect();
+            keys.sort_unstable_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+            for (slot, &(_, face)) in self.order[start..end].iter_mut().zip(&keys) {
+                *slot = face;
+            }
             let mid = (start + end) / 2;
             let l = self.build(start, mid);
             let r = self.build(mid, end);
