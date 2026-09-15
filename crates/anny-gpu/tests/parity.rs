@@ -9,7 +9,7 @@ use anny_core::model::{Anny, Parameters};
 use anny_core::typed::{apply_blendshapes, TensorF32};
 use anny_core::{AnnyConfig, ModelData};
 use anny_gpu::blendshapes::{BlendshapeKernel, Weights};
-use anny_gpu::Gpu;
+use anny_gpu::{Gpu, GpuError};
 
 /// Absolute bound: three orders below the 1e-3 tolerance the Unity bake tests use.
 const MAX_ABS_DIFF: f64 = 1e-5;
@@ -125,6 +125,47 @@ fn resident_weights_reproduce_the_one_shot_path_exactly() {
         one_shot, resident,
         "resident weights must reproduce the one-shot path bit for bit"
     );
+}
+
+/// The same rules as `tests/boundaries.rs`, driven through the real buffers: bad caller input has to
+/// come back as an error rather than a panic in a slice or a wgpu validation failure, and a valid
+/// call has to keep working on the same objects afterwards.
+#[test]
+fn malformed_caller_input_errors_and_leaves_the_paths_usable() {
+    let Some((gpu, _data, template, blendshapes, c)) = fixture() else {
+        return;
+    };
+    let kernel = BlendshapeKernel::new(&gpu).expect("kernel builds");
+    let weights = Weights::upload(&gpu, &template.data, &blendshapes.data, c);
+    let batch = 4;
+    let short = vec![0.0f32; batch * c - 1];
+    assert!(
+        matches!(
+            weights.run(&gpu, &kernel, &short, batch),
+            Err(GpuError::InvalidInput(_))
+        ),
+        "resident path must reject a short coefficient row"
+    );
+    assert!(
+        matches!(
+            kernel.run(&gpu, &template.data, &blendshapes.data, &short, batch, c),
+            Err(GpuError::InvalidInput(_))
+        ),
+        "one-shot path must reject a short coefficient row"
+    );
+    assert!(
+        matches!(
+            weights.run(&gpu, &kernel, &short, usize::MAX),
+            Err(GpuError::InvalidInput(_))
+        ),
+        "an overflowing batch count must be rejected"
+    );
+    // The valid call on the same objects still runs, so nothing above mutated state.
+    let coeffs = coefficients(batch, c);
+    let out = weights
+        .run(&gpu, &kernel, &coeffs.data, batch)
+        .expect("resident run");
+    assert_eq!(out.len(), batch * template.data.len());
 }
 
 /// Four phenotype vectors close to the default — each row nudges every phenotype a little, which is
