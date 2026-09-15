@@ -194,8 +194,8 @@
   "unity_editmode": {
     "failed": 0,
     "name": "Unity EditMode suites",
-    "passed": 26,
-    "total": 26
+    "passed": 34,
+    "total": 34
   },
   "unity_editor": "6000.6.0f1",
   "unity_exactness": {
@@ -206,6 +206,16 @@
     "skin_weights": "Unlimited",
     "skinning_identity_at_bind_pose_m": 3.3e-07,
     "unity_bake_vs_native_vertices_m": 6.24606e-07
+  },
+  "unity_humanoid": {
+    "avatar_is_human": true,
+    "avatar_is_valid": true,
+    "bones_outside_the_definition": 50,
+    "mapped_bones": 54,
+    "missing_required_slots": 0,
+    "note": "Unity's own verdict on the avatar AnnyHumanoid.Build returns for the anny rig's unmodified hierarchy; the 50 bones the humanoid definition cannot carry are named in integrations/unity/README.md, so humanoid playback approximates Anny's pose while baked Anny clips stay exact",
+    "rig_bones": 104,
+    "slots_filled": 54
   },
   "unity_physics": {
     "bounds_tolerance_m": 0.001,

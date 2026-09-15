@@ -107,6 +107,36 @@ influence silently changes the result.
 The pose session is the fast update path and only covers the skeleton: 0.43 ms against 0.75 ms for a
 full evaluation in the same scene. It cannot express phenotype changes, which need a full evaluate.
 
+## Humanoid avatars
+
+`AnnyHumanoid.Build(rig)` returns a Unity humanoid `Avatar` for the anny rig, so an `Animator` can
+drive the character from any humanoid clip set. The mapping is in `Runtime/AnnyHumanoid.cs` and is
+checked against the native description in `Tests/EditMode/AnnyHumanoidTests.cs`.
+
+Two properties of the rig allowed the mapping without touching the hierarchy:
+
+- the anny `root` bone sits at the pelvis, at the same point as `pelvis.L` and `pelvis.R`, so it is a
+  legal `Hips` with both legs and the spine beneath it. `HipsSitsAtThePelvis` asserts that, so a rig
+  whose root moved to the floor fails a test instead of quietly producing a wrong avatar;
+- the spine is numbered downwards — `spine05` is the lowest and `spine01` the highest — so the slots
+  are filled by height: `spine05` -> Spine, `spine04` -> Chest, `spine03` -> UpperChest. `spine01`,
+  which is also the parent of the clavicles and the neck, has no slot.
+  `SpineSlotsFollowTheHeightNotTheNumber` asserts the heights rather than the names.
+
+Finger order comes from the hand geometry, not from the names: `finger1` is the thumb (its base is the
+nearest to the wrist at 0.042 against 0.089-0.100, and it deviates 37.9 degrees from the
+middle-finger axis) and `finger5` is the pinky. `FingerOrderMatchesTheHandGeometry` asserts both the
+slots and that distance relation.
+
+**What the humanoid definition cannot carry.** 54 of the rig's 104 bones fill the 54 slots.
+`AnnyHumanoidReport.UnmappedLabels` names the other 50, which humanoid clips will not drive: the
+second bone of every limb segment (`upperarm02`, `lowerarm02`, `upperleg02`, `lowerleg02`), the two
+bones above `spine03`, `shoulder01`, `neck02`/`neck03`, the four metacarpals per hand, and thirteen of
+the fourteen toe bones per foot. A humanoid playback is therefore an approximation of Anny's pose
+rather than a reproduction of it, and Anny's own baked clips remain the exact path. For the prepared
+model the editor reports `mapped 54/104 bones onto 54 humanoid slots, missing 0 required, 50 bones
+left outside the humanoid definition; valid=True human=True`.
+
 ## Player builds
 
 ```bash

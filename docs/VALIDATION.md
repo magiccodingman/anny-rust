@@ -141,10 +141,23 @@ The Unity package is validated by running the installed editor headlessly, not b
 Editor 6000.6.0f1, `-batchmode -nographics`, licence resolved locally. Measured against the same
 prepared model the other surfaces use (`output/ci-model.safetensors`, 13,718 vertices, 104 bones).
 
-* **EditMode 21/21.** ABI handshake, model load and describe, evaluation, mesh topology, exact vertex
+* **EditMode 34/34.** ABI handshake, model load and describe, evaluation, mesh topology, exact vertex
   parity, influence order and preservation, bind-pose inversion, rig parent structure, rig world-pose
-  composition, coordinate-convention determinant, and the bake-to-Unity-assets workflow.
-* **PlayMode 5/5.** Generation, phenotype updates, disposal, and the pose session path in a live loop.
+  composition, coordinate-convention determinant, the bake-to-Unity-assets workflow, and the humanoid
+  mapping: every one of the 54 slots filled by the rig's own bones, the spine slots chosen by height
+  rather than by name, the thumb/pinky order taken from the hand geometry, a description that covers
+  the whole skeleton, a valid Unity avatar, a hierarchy the mapping leaves untouched, and a rig
+  missing required bones being reported rather than guessed.
+* **PlayMode 10/10.** Generation, phenotype updates, disposal, the pose session path in a live loop,
+  skinned-mode bake parity, animation-clip playback parity, and the physics surface.
+
+Unity's own verdict on the humanoid avatar is recorded rather than paraphrased: `AnnyHumanoid.Build`
+returns one for which `isHuman` and `isValid` are both true, and the editor logs `mapped 54/104 bones
+onto 54 humanoid slots, missing 0 required, 50 bones left outside the humanoid definition; valid=True
+human=True`. The 50 bones outside the definition are named in `integrations/unity/README.md`:
+humanoid playback approximates Anny's pose, and baked Anny clips remain the exact path. The counts in
+this section were stale at 21/21 and 5/5 before this pass and are now the numbers the runs actually
+produced.
 
 Exactness and tolerance are separated deliberately. The mesh is compared against the native array it
 was built from at zero tolerance (0 m). Skinning is compared at a measured tolerance:

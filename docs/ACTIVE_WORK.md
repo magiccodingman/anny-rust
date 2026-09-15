@@ -68,11 +68,13 @@ Optional future work also includes CUDA/ROCm-specialized backends and qualificat
 
 If further agentic work is performed in a transient browser environment, keep using small ordinary source commits and PR comments as durable handoff. Do not accumulate large local-only deltas. If GitHub writes temporarily fail, retry shortly; if they remain unavailable, stop and involve the owner.
 
-### Unity is integrated, validated in the editor, and now in real players, with editor controls and physics
+### Unity is integrated, validated in the editor, and now in real players, with editor controls, physics and humanoid avatars
 
 `integrations/unity/` holds UPM package `com.magiccodingman.anny` (native plugin, runtime, editor
-tooling, tests) plus the host project the tests run in. EditMode 26/26 and PlayMode 10/10 pass against
+tooling, tests) plus the host project the tests run in. EditMode 34/34 and PlayMode 10/10 pass against
 the real editor and a real model; see VALIDATION.md for the numbers and the two defects the runs found.
+`AnnyHumanoid` adds a Unity humanoid avatar for the rig, accepted by Unity itself (`valid=True
+human=True`); what the humanoid definition cannot carry is named in `integrations/unity/README.md`.
 
 Both Linux players build and run (`tools/build-players.sh`). Mono and IL2CPP generate the same
 character through the native plugin — 13,718 source vertices, 82,260 mesh vertices, 27,420 triangles,
@@ -95,14 +97,22 @@ Physics is done too: `AnnyMeshCollider` drives a `MeshCollider` from the generat
 on evaluation in Exact mode. A raycast against the cooked collider agrees with ray/triangle
 intersections computed from the mesh at `delta = 0` (f32 print precision) against a 1e-3 m tolerance.
 
-Still open, in dependency order:
+Open items and recently closed ones, in dependency order:
 
 1. WebGL player build — attempted, blocked inside Unity's own web build: the archive links and the
    generated shim resolves every `__cxa*`/EH helper (`undefined symbol` count 0), but Unity's WebGL
    build disables exceptions and longjmp while Rust's `wasm32-unknown-emscripten` std imports 47
    `invoke_*` unwind trampolines (428 references). `docs/UNITY_WEBGL.md` records the shim, the archive
    digest and the three unblock options; no player is claimed.
-2. Humanoid/avatar mapping (`AvatarBuilder`) on top of the baked-clip work.
+2. Humanoid/avatar mapping — done. `AnnyHumanoid.Build(rig)` builds a Unity humanoid `Avatar` from the
+   anny rig's own hierarchy and Unity accepts it: `valid=True human=True`, 54 of the 104 bones filling
+   all 54 slots with 0 required missing, covered by 8 new EditMode tests. No hierarchy change was
+   needed — the anny `root` bone already sits at the pelvis — so poses are unaffected. The honest limit
+   is recorded with it: 50 bones stay outside the humanoid definition (the second bone of each limb
+   segment, the two spine bones above `spine03`, `shoulder01`, `neck02`/`neck03`, the metacarpals, and
+   13 of the 14 toe bones per foot), so humanoid playback approximates Anny's pose rather than
+   reproducing it; Anny's baked clips remain the exact path
+   (`integrations/unity/README.md`, "Humanoid avatars").
 3. GPU/WebGPU: shipped on both targets — native Vulkan and the browser's WebGPU — measured, and correctly
    left unwired (`docs/GPU.md`); the browser suites re-qualify on the same artifact. The remaining CPU work
    is unchanged.
