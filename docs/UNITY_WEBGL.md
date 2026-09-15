@@ -73,8 +73,9 @@ eight symbols (`__cxa_allocate_exception`, `__cxa_begin_catch`, `__cxa_end_catch
 `__cxa_find_matching_catch_2`, `__cxa_find_matching_catch_4`, `__cxa_throw`, `llvm_eh_typeid_for`,
 `__resumeException`) as aborts.
 
-Result: the link goes from **6 undefined symbols to 1** — and that last one is structural, not a
-missing definition:
+Result: the link goes from **6 undefined symbols to 1**. Verified with this generated shim in place:
+`errors=1`, `undefined symbol` occurrences **0** — and that last failure is structural, not a missing
+definition:
 
 ```
 AssertionError: invoke_ functions exported but exceptions and longjmp are both disabled
