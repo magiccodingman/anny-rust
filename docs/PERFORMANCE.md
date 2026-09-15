@@ -135,6 +135,31 @@ Equivalence evidence, since "same output" is the entire point:
 - The bench rows outside the prepare group are unchanged, so nothing here traded against generation or
   the session path.
 
+### Zero-copy loading: what an mmap path would preserve, and why it is not taken
+
+Loading still copies: `ArchiveF32::from_bytes` deserializes the file and `decode` produces owned
+buffers, so a prepared reload is a pass over the payload (≈25 ms for f32, ≈66 ms for f64) that exists
+only to move bytes out of the file. The obvious alternative is a read-only `mmap` with tensors borrowed
+from the mapping, which would remove that pass.
+
+*What that would preserve.* Today's guarantees are structural and per-tensor: the safetensors header is
+read and its offsets are checked against the buffer, `decode` rejects unsupported dtypes, and
+`Tensor::validate` checks each tensor's shape against its data length. Every one of those runs over
+mapped bytes exactly as well as over a read buffer, so an mmap path need not weaken any of them.
+
+*What it would cost.* `Tensor.data` is a public `Vec<f64>`/`Vec<f32>` and every kernel indexes it
+directly, so borrowing from a mapping means an owned-or-borrowed enum through the tensor type and its
+lifetimes — a change with reach into every kernel in the crate. For a one-off 25 ms per load that is a
+bad trade against code whose value is verified parity, so it is not taken.
+
+*If a trusted/prevalidated artifact path is ever wanted*, it has to be an explicit contract rather than a
+quiet mode: the payload carries a digest of its tensor region in `__metadata__`, and a caller has to ask
+for the trusting path by name. What that path skips is exactly the header and per-tensor validation
+above, which is only sound when the digest matches a value the caller recorded itself — and a payload
+whose digest does not match falls back to the validating path instead of loading. The default stays
+validating and no existing entry point changes behaviour. Until someone needs it, the honest state here
+is a copy that is already parallel and a reload already under 30 ms.
+
 ### The serialized payload is byte-reproducible now; the tensor region is still what gets pinned
 
 Setting up that comparison produced a *different* whole-file digest on every run of the same binary, and
