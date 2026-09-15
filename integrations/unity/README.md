@@ -83,3 +83,26 @@ ambiguous about which revision it describes.
 asset with bind poses and blend shapes, a material, and a prefab whose hierarchy is the
 bone rig. The result needs no native plugin at runtime beyond the model payload if you only
 use the pre-evaluated mesh.
+
+## Modes, and which one is exact
+
+`AnnyUpdateMode.Exact` uploads the *evaluated* vertices into the mesh every update and does no
+skinning. What lands in the mesh is the native array, element for element; the tests assert that at
+zero tolerance. Use it when the character must match the native result bit for bit.
+
+`AnnyUpdateMode.Skinned` is a normal Unity skinned character: the mesh carries the **bind-pose
+geometry** (`rest_vertices`), the bone hierarchy carries the transform, and the renderer skins. This
+matters — a skinned mesh is the *input* to skinning, so uploading an already-posed mesh skins the
+character a second time. Anny's default evaluation is not a bind pose (`bone_poses` differ from
+`rest_bone_poses` by up to 6.8e-02), so the two geometries differ by centimetres and the mistake is
+visible rather than subtle.
+
+Unity's skinning is not bit-identical to Anny's, so skinned mode is qualified by tolerance, measured
+rather than assumed: baking the skinned character at the evaluated pose reproduces the native
+`vertices` array to 6.2e-07 m worst case over 27,436 moved vertices, with `QualitySettings.skinWeights`
+set to Unlimited and all nine influences of this rig present. If the active quality level caps
+influences, `AnnyCharacter` logs a warning naming the setting and the counts, because a dropped
+influence silently changes the result.
+
+The pose session is the fast update path and only covers the skeleton: 0.43 ms against 0.75 ms for a
+full evaluation in the same scene. It cannot express phenotype changes, which need a full evaluate.

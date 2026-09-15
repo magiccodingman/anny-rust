@@ -103,3 +103,42 @@ Playwright 1.51 asks for a *headless shell* download that a plain `install chrom
 launch fails with `chromium_headless_shell-<rev>` missing, point it at a full Chromium instead: the
 harness honours `CHROMIUM_PATH`, and `~/.cache/ms-playwright/chromium-*/chrome-linux/chrome` works.
 The browser check needs the archive `anny prepare` writes (`output/ci-model.safetensors` here).
+
+## Unity integration
+
+The Unity package is validated by running the installed editor headlessly, not by inspecting it.
+`integrations/unity/tools/run-unity-tests.sh {EditMode|PlayMode}` drives it; results land in JUnit XML.
+
+Editor 6000.6.0f1, `-batchmode -nographics`, licence resolved locally. Measured against the same
+prepared model the other surfaces use (`output/ci-model.safetensors`, 13,718 vertices, 104 bones).
+
+* **EditMode 21/21.** ABI handshake, model load and describe, evaluation, mesh topology, exact vertex
+  parity, influence order and preservation, bind-pose inversion, rig parent structure, rig world-pose
+  composition, coordinate-convention determinant, and the bake-to-Unity-assets workflow.
+* **PlayMode 5/5.** Generation, phenotype updates, disposal, and the pose session path in a live loop.
+
+Exactness and tolerance are separated deliberately. The mesh is compared against the native array it
+was built from at zero tolerance (0 m). Skinning is compared at a measured tolerance:
+
+| Quantity | Worst error |
+| --- | --- |
+| Mesh vertices vs the native array | 0 m (element-wise, exact) |
+| Single-precision model vs wide evaluation | 5.0e-07 m |
+| Skinning data at the bind pose (reference LBS, identity map) | 3.3e-07 m |
+| Unity's `SkinnedMeshRenderer` bake vs native `vertices` | 6.24606e-07 m |
+
+The bake figure is 27,436 moved vertices at quality level `Ultra` with `skinWeights` Unlimited and all
+nine influences of the rig present. A quality level that caps influences silently changes the result,
+so `AnnyCharacter` warns when the active setting would drop one.
+
+Runtime path timing in the same scene: pose session **0.4434 ms** against **0.7896 ms** for a full
+evaluation, moving 27,436 vertices with a largest displacement of 0.229793 m.
+
+Two failures worth recording because they were found only by running:
+
+* Unity requires per-vertex influences in descending weight order and logs an error otherwise. Anny
+  does not store them sorted, and the first packer also truncated by position rather than by smallest
+  weight, silently changing 12 vertices.
+* Skinned mode initially uploaded the *evaluated* vertices into a mesh whose bones then skinned them
+  again — a double-skinned character. The mesh must carry the bind-pose geometry: Anny's default
+  evaluation is not a bind pose (`bone_poses` differ from `rest_bone_poses` by up to 6.8e-02).

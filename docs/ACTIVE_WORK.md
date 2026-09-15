@@ -54,3 +54,17 @@ Optional future work also includes CUDA/ROCm-specialized backends and qualificat
 ## Agent/recovery discipline
 
 If further agentic work is performed in a transient browser environment, keep using small ordinary source commits and PR comments as durable handoff. Do not accumulate large local-only deltas. If GitHub writes temporarily fail, retry shortly; if they remain unavailable, stop and involve the owner.
+
+### Unity is integrated and validated in the editor
+
+`integrations/unity/` holds UPM package `com.magiccodingman.anny` (native plugin, runtime, editor
+tooling, tests) plus the host project the tests run in. EditMode 21/21 and PlayMode 5/5 pass against
+the real editor and a real model; see VALIDATION.md for the numbers and the two defects the runs found.
+
+Still open, in dependency order:
+
+1. **Player builds**: Linux Mono and Linux IL2CPP, then WebGL. This is the only thing that exercises the
+   plugin under IL2CPP marshalling and a shipped data layout, so it is the next item.
+2. Editor controls: custom inspector, presets, bake window UI (the baker itself is done and tested).
+3. Physics integration (`MeshCollider` from generated geometry) and animation/avatar retargeting.
+4. GPU/WebGPU and the remaining CPU work.

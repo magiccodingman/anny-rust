@@ -30,6 +30,24 @@ if [ ! -f "$model" ]; then
   echo "warning: no prepared model at $model; geometry tests will be ignored" >&2
 fi
 
+# Unity's script compiler backend (Bee) can outlive the editor process. Starting the next run while
+# its backend is still alive cancels compilation, and Unity reports "Scripts have compiler errors" —
+# indistinguishable from a real code error unless you read the log for "Internal build system error".
+wait_for_unity_exit() {
+    local tries=0
+    while pgrep -f "Hub/Editor/.*/Editor/Unity" >/dev/null 2>&1; do
+        tries=$((tries + 1))
+        if [ "$tries" -gt 120 ]; then
+            echo "warning: a Unity editor process is still running; continuing anyway" >&2
+            break
+        fi
+        sleep 0.5
+    done
+    sleep 1
+}
+
+wait_for_unity_exit
+
 results="/tmp/anny-unity-$platform.xml"
 log="/tmp/anny-unity-$platform.log"
 rm -f "$results" "$log"

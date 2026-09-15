@@ -193,6 +193,9 @@ namespace Anny
             LastEvaluateMs = watch.Elapsed.TotalMilliseconds;
             Evaluations = 1;
 
+            // A skinned character must carry the bind-pose geometry: the renderer's bones supply the
+            // pose. Exact mode uploads the evaluated vertices and needs no skinning at all.
+            meshOptions.UseBindPoseGeometry = mode == AnnyUpdateMode.Skinned;
             AnnyMeshResult built = AnnyMeshBuilder.Build(runtime, lastOutput, meshOptions);
             GeneratedMesh = built.Mesh;
             Report = built.Report;

@@ -389,6 +389,33 @@ namespace Anny.Tests
         }
 
         [Test]
+        public void BindPoseGeometryModeCarriesTheRestVertices()
+        {
+            using (AnnyModelF32 runtime = AnnyTestModels.LoadSingle())
+            using (AnnyOutputF32 output = runtime.Evaluate(new AnnyParameters()))
+            {
+                AnnyMeshOptions options = new AnnyMeshOptions();
+                options.UseBindPoseGeometry = true;
+                AnnyMeshResult built = AnnyMeshBuilder.Build(runtime, output, options);
+                Vector3[] rest = AnnyMeshBuilder.ToPositions(
+                    output.Tensor(AnnyOutputF32.RestVertices).Data,
+                    AnnyTestModels.ExpectedVertices);
+
+                int[] map = built.CornerSource;
+                Assert.IsNotNull(map, "expanded mesh keeps a corner map");
+                int mismatched = 0;
+                for (int i = 0; i < built.Mesh.vertexCount; i++)
+                {
+                    Vector3 want = rest[map[i]];
+                    Vector3 got = built.Mesh.vertices[i];
+                    if (want != got) mismatched++;
+                }
+
+                Assert.AreEqual(0, mismatched, "bind-pose mesh must carry rest_vertices");
+            }
+        }
+
+        [Test]
         public void BoneWeightsDescendForEveryVertex()
         {
             // Unity logs an error and mis-skins when a vertex's influences are not in descending

@@ -25,6 +25,14 @@ namespace Anny
         /// </summary>
         public int MaxBoneInfluences { get; set; }
 
+        /// <summary>
+        /// Build the mesh from the bind-pose geometry (rest_vertices) rather than the evaluated
+        /// vertices. A skinned renderer needs this: the mesh is the input to skinning and the bones
+        /// are the transform, so uploading an already-posed mesh skins the character a second time.
+        /// Anny's default evaluation is not a bind pose, so the two differ by centimetres.
+        /// </summary>
+        public bool UseBindPoseGeometry { get; set; }
+
         /// <summary>Builds morph targets from the model's blendshape stack.</summary>
         public bool BuildBlendshapes { get; set; }
 
@@ -54,6 +62,7 @@ namespace Anny
         public int Triangles;
         public int BoneInfluenceWidth;
         public int MaxBoneInfluences;
+
         public int VerticesWithTruncatedInfluences;
         public float LargestDroppedWeight;
 
@@ -230,7 +239,8 @@ namespace Anny
             }
 
             options = options ?? new AnnyMeshOptions();
-            AnnyTensorF32 positions = output.Tensor(AnnyOutputF32.Vertices);
+            AnnyTensorF32 positions = output.Tensor(
+                options.UseBindPoseGeometry ? AnnyOutputF32.RestVertices : AnnyOutputF32.Vertices);
             AnnyTensorF32 bind = output.Tensor(AnnyOutputF32.RestBonePoses);
             AnnyTensorF32 faces = model.Tensor("faces");
             AnnyTensorF32 skinWeights = model.Tensor("vertex_bone_weights");
