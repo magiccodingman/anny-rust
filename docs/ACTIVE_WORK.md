@@ -58,7 +58,7 @@ If further agentic work is performed in a transient browser environment, keep us
 ### Unity is integrated, validated in the editor, and now in real players, with editor controls and physics
 
 `integrations/unity/` holds UPM package `com.magiccodingman.anny` (native plugin, runtime, editor
-tooling, tests) plus the host project the tests run in. EditMode 21/21 and PlayMode 5/5 pass against
+tooling, tests) plus the host project the tests run in. EditMode 26/26 and PlayMode 8/8 pass against
 the real editor and a real model; see VALIDATION.md for the numbers and the two defects the runs found.
 
 Both Linux players build and run (`tools/build-players.sh`). Mono and IL2CPP generate the same
@@ -70,10 +70,16 @@ the process exit code from that result.
 
 Editor controls are done: `AnnyCharacterEditor` drives generation from edit mode with the phenotype
 sliders and the mesh report, `AnnyPreset` captures and applies a configuration as an ordinary asset,
-and `AnnyBakeWindow` exposes the baker. EditMode is 26/26 with those covered.
+and `AnnyBakeWindow` exposes the baker. EditMode is 26/26 with those covered, and the new groups are
+mutation-checked: dropping the preset's slider copy fails the round trip and removing the inspector's
+registration fails the inspector test.
+
+Physics is done too: `AnnyMeshCollider` drives a `MeshCollider` from the generated mesh, re-cooking it
+on evaluation in Exact mode. A raycast against the cooked collider agrees with ray/triangle
+intersections computed from the mesh at `delta = 0` (f32 print precision) against a 1e-3 m tolerance.
 
 Still open, in dependency order:
 
-1. Physics integration (`MeshCollider` from generated geometry) and animation/avatar retargeting.
-2. WebGL player build, which needs the wasm bindings rather than the cdylib the other two use.
+1. WebGL player build, which needs the wasm bindings rather than the cdylib the other two use.
+2. Animation/avatar retargeting (Humanoid mapping and clip playback on the generated rig).
 3. GPU/WebGPU and the remaining CPU work.
