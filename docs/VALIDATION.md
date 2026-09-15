@@ -32,7 +32,11 @@ Local validation against the pinned source, recorded September 13, 2026.
   0** across 4 x 41,154 values at batch 4, reproduced exactly on a second run, with no page errors. The
   adapter name is redacted by Chrome, so the check records ` [BrowserWebGpu]` — the backend is what shows
   the call really went through WebGPU instead of silently falling back. Both browser suites ran against
-  the same `anny_wasm_bg.wasm` (2,321,153 bytes).
+  the same `anny_wasm_bg.wasm` (2,321,153 bytes, sha256 `200aa38afbb8a1df858299a37d5a7ab195ee8e14fd9d1b84666c94160e426fbb`).
+  That digest was re-measured after the instance-serialization change in `crates/anny-gpu`: the rebuild has
+  the same size and a different hash, because panic locations embed file and line, so both suites were
+  re-run against the rebuilt module rather than assumed equivalent — 14/14 and 7/7 again, `worst: 0`
+  unchanged, adapter still ` [BrowserWebGpu]`.
 - The parallel BVH build produces the same tree as the sequential one, node for node
   (`mesh::build_tests::the_parallel_build_produces_the_sequential_tree`), and every real-data digest
   (`collision_native`, `prepared_payload`, `native_import`) is unchanged by it.

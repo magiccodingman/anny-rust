@@ -1,5 +1,13 @@
 {
   "atol": 1e-06,
+  "browser_artifact": {
+    "bytes": 2321153,
+    "extra_bytes_with_gpu": 88204,
+    "note": "Built with cargo build --release --locked --target wasm32-unknown-unknown -p anny-wasm, then wasm-bindgen --target web. The size alone does not identify this artifact: a rebuild at a later source revision produced the same 2,321,153 bytes with a different digest, because panic locations embed file and line. Both browser suites were re-run against the digest recorded here.",
+    "path": "output/wasm-web/anny_wasm_bg.wasm",
+    "sha256": "200aa38afbb8a1df858299a37d5a7ab195ee8e14fd9d1b84666c94160e426fbb",
+    "size_without_gpu": 2322949
+  },
   "browser_editor_execution": "Chromium 145.0.7632.6 through examples/qualification/editor-smoke.cjs (developer-only, not run by CI): 14/14 checks passed with no page errors and a clean console - panels built from describe(), a panel slider that moves the mesh, the same parameter through the editor's own entry point, posing through the pose session, an exact return to rest, GLB export accepted by the official glTF validator (0 errors, skins present), state save/load round trip, seeded randomisation, a texture applied to the material, clip playback, and 27,420 triangles drawn",
   "browser_editor_tested": true,
   "browser_execution": "Chromium 145.0.7632.6 through examples/qualification/browser.cjs (developer-only, not run by CI): full smoke passed with no page errors, including the f64 and f32 pose sessions matching evaluate exactly and surviving their model being freed",
