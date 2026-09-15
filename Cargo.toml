@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/anny-core", "crates/anny-cli", "crates/anny-capi", "crates/anny-wasm"]
+members = ["crates/anny-core", "crates/anny-cli", "crates/anny-capi", "crates/anny-wasm", "crates/anny-gpu"]
 resolver = "2"
 
 [workspace.package]

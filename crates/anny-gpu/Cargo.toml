@@ -1,0 +1,14 @@
+[package]
+name = "anny-gpu"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "GPU (wgpu/WebGPU) evaluation kernels for Anny, with CPU-parity checks"
+
+[dependencies]
+anny-core = { workspace = true }
+pollster = "1.0.1"
+thiserror = { workspace = true }
+wgpu = { version = "26", default-features = false, features = ["vulkan", "wgsl", "std"] }
