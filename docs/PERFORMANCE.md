@@ -236,11 +236,12 @@ right API shape for animation and editor sliders, and it avoids re-deriving the 
 is a 1.5-2x optimization, not a 32x one. Both `Anny::pose_session` and `AnnyF32::pose_session` exist
 and are exact-equivalence tested (`max difference 0e0` against `forward` on real data over 8 poses,
 all five pose conventions, plus bit-identical f32). They were reachable only from Rust until the
-bindings caught up: `anny_session_*` covers the C ABI in both dtypes, `AnnyPoseSession` covers C#, and
-`AnnyModel.poseSession()`/`AnnySession` covers WASM, each keeping a reference to its model so the
-model handle or object may be released first. The C and .NET examples now assert that a session's
-vertices equal `evaluate` exactly (not merely that the session is faster), which is the property a
-caller actually depends on.
+bindings caught up: `anny_session_*` covers the C ABI in both dtypes, `AnnyPoseSession` covers C#,
+`AnnyModel.pose_session()`/`AnnySession` covers WASM and the browser, and `anny motion` covers the CLI,
+where exporting a 600-frame clip went from 0.72 s to 0.42 s with a byte-identical `.glb` in both
+precisions. Each binding keeps a reference to its model so the model handle or object may be released
+first, and each one asserts that a session's vertices equal `evaluate` exactly (not merely that the
+session is faster), which is the property a caller actually depends on.
 
 **4. Collision was the single biggest outlier by an order of magnitude, and is now 2.2x cheaper.**
 `derive collision` cost 60.6 ms — ~100x a full generation of the same character. The split was
@@ -365,16 +366,19 @@ are unchanged to the last digit.
    the next step there is mmap or zero-copy (`safetensors` exposes the buffer; validating lazily on
    first use would trade the scan for weaker guarantees and needs a deliberate decision), or avoiding
    materializing blendshapes a configuration never uses.
-5. **GPU/WebGPU, Unity integration, browser editor, C/C#/WASM session exposure** — untouched. The
-   session API exists only in Rust (`Anny::pose_session`, `AnnyF32::pose_session`); no CLI, C, WASM or
-   C# surface exposes it yet, so the 1.5-2x is not reachable from those callers.
+5. **GPU/WebGPU, Unity integration, browser editor** — untouched. Session exposure to the CLI, C, C#,
+   WASM and the browser is done and tested, so the 1.5-2x is reachable from those callers; a Unity
+   package and a real editor UI are still missing, and both need a harness this repository does not
+   have (no Unity install, and the browser check only covers the API-level page).
 
 ## Status
 
 Optimizations implemented and measured, every one bit-equivalence tested against the path it replaced:
-the validation-scan fix (16-18x on every generation path), the parallel tensor decode (2.1x on both
-payload precisions), the pose session (1.5-2x on repeated
-re-posing), the collision BVH buffer reuse (2.17x), the direct f32 prepared-payload decode (4.9x), and
-the cold prepare path (9.6x, with its tensor digest pinned by `tests/prepare_equivalence.rs`). Everything
+the validation-scan fix (16-18x on every generation path), the pose session (1.5-2x on repeated
+re-posing, 1.7x on a 600-frame clip export, and now used by the CLI as well as exposed through C, C#,
+WASM and the browser), the collision search plus its BVH split key (64.6 -> 14.4 ms), the direct f32
+prepared-payload decode (4.9x), the parallel tensor decode (2.1x on both payload precisions), the
+one-pass f64->f32 conversion (1.82x), and the cold prepare path (9.6x, with its tensor digest pinned by
+`tests/prepare_equivalence.rs`). Everything
 in the ranking above is *not* done, and no row in this document is a real-time performance guarantee
 outside the measured host.

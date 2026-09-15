@@ -282,21 +282,35 @@ impl PoseClip {
             },
             &output,
         )?;
-        let mut poses = vec![output
-            .get("bone_poses")?
-            .data
-            .chunks_exact(16)
-            .map(mat4)
-            .collect()];
-        for i in 1..self.frames.len() {
-            poses.push(
-                evaluate(&self.frame_parameters(i)?)?
-                    .get("bone_poses")?
-                    .data
-                    .chunks_exact(16)
-                    .map(mat4)
-                    .collect(),
-            );
+        let bones_of = |output: &crate::ModelOutput| -> Result<Vec<_>> {
+            Ok(output
+                .get("bone_poses")?
+                .data
+                .chunks_exact(16)
+                .map(mat4)
+                .collect())
+        };
+        // A clip is one fixed character shape with one pose per frame, which is what a pose session is
+        // for: its coefficients and rest model are evaluated once, and each frame then pays only for its
+        // own pose. Frame 0 keeps the full `forward` above because the scene needs its whole output.
+        let mut poses = vec![bones_of(&output)?];
+        match &single {
+            Some(m) => {
+                let mut session = m.pose_session(&first)?;
+                for i in 1..self.frames.len() {
+                    let frame = self.frame_parameters(i)?;
+                    poses.push(bones_of(
+                        &session.update(&frame.pose_parameters)?.to_reference(),
+                    )?);
+                }
+            }
+            None => {
+                let mut session = model.pose_session(&first)?;
+                for i in 1..self.frames.len() {
+                    let frame = self.frame_parameters(i)?;
+                    poses.push(bones_of(session.update(&frame.pose_parameters)?)?);
+                }
+            }
         }
         scene.add_animation(Animation {
             name: self.name.clone(),
