@@ -41,12 +41,12 @@ See:
 
 The following remain the major successor workstream:
 
-1. GPU/WebGPU backend — first kernel done: `crates/anny-gpu` runs the blendshape
-   contraction on wgpu/Vulkan, with parity tests and a sparsity-aware crossover in
-   `docs/GPU.md`. Remaining: a browser (WebGPU) target. Wiring is *not* remaining: the
-   measured ceiling (1.5-1.8x of `rest_model` even if the stage were free, and a loss
-   for sparse poses below batch ~16) is why the kernel stays behind the measured
-   numbers instead of in the default path.
+1. GPU/WebGPU backend — done on both targets: `crates/anny-gpu` runs the blendshape
+   contraction on wgpu/Vulkan natively and on the browser's WebGPU, with parity tests, a
+   sparsity-aware crossover and the 7-check browser qualification recorded in `docs/GPU.md`.
+   It still stays behind the measured numbers instead of in the default path: the ceiling is
+   1.5-1.8x of `rest_model` even if the stage were free, and it is a loss for sparse poses
+   below batch ~16.
 2. SIMD tuning.
 3. Unity Runtime/Editor package.
 4. Complete browser character editor.
@@ -54,10 +54,11 @@ The following remain the major successor workstream:
    measured through and corrected: 2 closed (per-character accumulation at the hardware limit;
    zero-copy loading decided-and-declined), 1 answered and its stale number fixed (`derive measure` is
    1.238 ms min / 1.590 ms median, not 8.5 ms), 1 blocked on a deliberate parity decision (collision's
-   exact-AABB candidate set changes the answer, so it is not a pure optimization). Two things need the
-   owner rather than more work: a browser (WebGPU) target, since bumping `js-sys`/`wasm-bindgen` to
-   wgpu's web requirements invalidates the 14/14 browser validation of the shipped `anny-wasm` build;
-   and that collision parity call. Nothing else on this list is actionable without one of those.
+   exact-AABB candidate set changes the answer, so it is not a pure optimization). One thing still needs
+   the owner rather than more work: that collision parity call. The browser (WebGPU) item listed here is
+   now delivered, and it was never actually blocked: wgpu 26 — the version in use — requires exactly the
+   `js-sys`/`wasm-bindgen` versions this workspace pins, so no bump was needed and the 14/14 editor result
+   was re-qualified on the new artifact rather than invalidated.
 
 Progress against that list is recorded in `docs/PERFORMANCE.md`: the prepare/reload, tensor-decode, precision-conversion and collision hot paths are done (9.6×, 2.1×, 1.82×, and 2.3× on the BVH build that dominated the remaining collision frame); the pose session is reachable from Rust, the CLI, C, C#, the WASM bindings and the browser; the serialized payload is byte-reproducible across processes; and the browser editor is built and passes 14 checks in a real Chromium (`examples/qualification/editor-smoke.cjs`). Zero-copy loading is decided rather than pending, and declined, in the section of `docs/PERFORMANCE.md` that states what an mmap path would preserve and what a trusted/prevalidated artifact path would have to be. Since then Unity has been integrated against the real installed editor and both Linux players build and run; the GPU backend has its first measured kernel (`docs/GPU.md`); the remaining CPU work is what is left.
 
@@ -102,8 +103,9 @@ Still open, in dependency order:
    `invoke_*` unwind trampolines (428 references). `docs/UNITY_WEBGL.md` records the shim, the archive
    digest and the three unblock options; no player is claimed.
 2. Humanoid/avatar mapping (`AvatarBuilder`) on top of the baked-clip work.
-3. GPU/WebGPU: first kernel shipped, measured and correctly left unwired (`docs/GPU.md`); the browser
-   (WebGPU) target remains. The remaining CPU work is unchanged.
+3. GPU/WebGPU: shipped on both targets — native Vulkan and the browser's WebGPU — measured, and correctly
+   left unwired (`docs/GPU.md`); the browser suites re-qualify on the same artifact. The remaining CPU work
+   is unchanged.
 
 ### GPU: one kernel shipped, batch-only, and measured
 
@@ -121,5 +123,6 @@ of a 0.437 ms `rest_model`, even a free GPU stage could not exceed ~1.5-1.8x end
 That is the reason the kernel stays unwired: it is a batch accelerator for dense coefficient workloads and a
 loss for typical sparse poses, and accelerating it alone cannot pay. The measured ceiling says any larger win
 has to come from a different stage (orientations/Procrustes/normals in `rest_model`, or the pose/skinning/export
-path), not from this contraction. There is no browser WebGPU target yet: the workspace pins `js-sys`/`wasm-bindgen`
-for the browser-validated `anny-wasm` build and wgpu's web backend requires a newer `js-sys`.
+path), not from this contraction. A browser WebGPU target now exists as well and is qualified in the same
+file; it needed no dependency bump, because wgpu 26's web backend requires exactly the `js-sys`/`wasm-bindgen`
+versions this workspace already pins for the browser-validated `anny-wasm` build.

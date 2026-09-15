@@ -63,6 +63,28 @@ It writes `output/editor-result.json`, `output/editor-export.glb` and a viewport
 `output/editor-viewport.png`. Set `CHROMIUM_PATH` to use an existing Chromium instead of Playwright's
 own download.
 
+## Browser GPU (WebGPU)
+
+The same artifact exports the blendshape contraction for the GPU, so a page can run it on the browser's
+own WebGPU adapter:
+
+- `default_coefficients(bytes, batch)` — the default character's own coefficients, tiled `batch` times
+  with the active rows rotated, so a batch carries real sparsity (~5% active) rather than a dense fill;
+- `cpu_blendshapes(bytes, coefficients, batch)` — the f32 reference contraction;
+- `gpu_blendshapes(bytes, coefficients, batch)` — the same contraction through WebGPU (async);
+- `gpu_adapter_name()` — the adapter the last GPU call opened. Chrome redacts the name, so this reports
+  the backend too, e.g. ` [BrowserWebGpu]`, which is what shows the call did go through WebGPU.
+
+`examples/qualification/webgpu-smoke.cjs` compares the two in the page and records the result:
+
+```bash
+CHROMIUM_PATH=/usr/bin/google-chrome node examples/qualification/webgpu-smoke.cjs \
+  output/wasm-web/anny_wasm.js output/ci-model.safetensors
+```
+
+It writes `output/webgpu-result.json`. Each one-shot call re-uploads the whole blendshape tensor, so this
+path is qualified for agreement with the CPU, not for speed — see `docs/GPU.md`.
+
 ## Notes and limits
 
 - Parameter ranges are a UI convention, not something the model reports: `describe()` names the

@@ -3,6 +3,8 @@
 use anny_core::{Anny, AnnyConfig, ModelOutput, Parameters, PoseSession, Tensor};
 use std::sync::Arc;
 use wasm_bindgen::prelude::*;
+
+pub mod gpu;
 fn js_error(e: impl std::fmt::Display) -> JsValue {
     JsValue::from_str(&e.to_string())
 }

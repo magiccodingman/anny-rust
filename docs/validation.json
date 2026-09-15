@@ -4,6 +4,8 @@
   "browser_editor_tested": true,
   "browser_execution": "Chromium 145.0.7632.6 through examples/qualification/browser.cjs (developer-only, not run by CI): full smoke passed with no page errors, including the f64 and f32 pose sessions matching evaluate exactly and surviving their model being freed",
   "browser_execution_tested": true,
+  "browser_webgpu_execution": "Google Chrome 152.0.7977.64 through examples/qualification/webgpu-smoke.cjs (system Chrome via CHROMIUM_PATH, --enable-unsafe-webgpu; developer-only, not run by CI): 7/7 checks passed against the same anny_wasm_bg.wasm (2,321,153 bytes) the editor suite passes 14/14 with. navigator.gpu present, the four GPU exports bound, the default character's own coefficients (128 of 2496 nonzero, 5.13%), WebGPU output worst absolute difference 0 vs the f32 CPU reference over 4 x 41,154 values at batch 4 and 0 again on a second run, no page errors. Adapter name redacted by Chrome; reported as ' [BrowserWebGpu]', so the backend - not the name - is what proves the call went through WebGPU",
+  "browser_webgpu_tested": true,
   "c_abi_smoke": "ABI 1: 13718 vertices, 27420 faces; pose sessions match evaluate exactly (f64+f32) and survive anny_model_free",
   "cache_reload_passed": true,
   "cases": [

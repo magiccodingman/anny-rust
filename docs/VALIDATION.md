@@ -22,7 +22,17 @@ Local validation against the pinned source, recorded September 13, 2026.
   randomisation that repeats and differs by seed, a texture applied to the material, clip playback, and
   27,420 triangles actually drawn by the viewport — with no page errors and a clean console. Two
   independent sessions produced identical geometry digests at every stage, so the whole WASM →
-  browser → geometry pipeline is reproducible run to run, not only within a session.
+  browser → geometry pipeline is reproducible run to run, not only within a session. Re-qualified 14/14 on
+  Google Chrome 152.0.7977.64 when the WebGPU module was added to the artifact.
+- Browser GPU -> WebGPU -> 7 checks: passed. `examples/qualification/webgpu-smoke.cjs` imports the same
+  artifact into Google Chrome 152.0.7977.64 (system Chrome via `CHROMIUM_PATH`; the bundled Playwright
+  browsers are only ever partial on this machine) with `--enable-unsafe-webgpu`, builds the default
+  character's own coefficients (128 of 2496 nonzero, 5.13% — the same sparsity as natively), and compares
+  the WebGPU result against the f32 CPU reference computed in the same page: **worst absolute difference
+  0** across 4 x 41,154 values at batch 4, reproduced exactly on a second run, with no page errors. The
+  adapter name is redacted by Chrome, so the check records ` [BrowserWebGpu]` — the backend is what shows
+  the call really went through WebGPU instead of silently falling back. Both browser suites ran against
+  the same `anny_wasm_bg.wasm` (2,321,153 bytes).
 - The parallel BVH build produces the same tree as the sequential one, node for node
   (`mesh::build_tests::the_parallel_build_produces_the_sequential_tree`), and every real-data digest
   (`collision_native`, `prepared_payload`, `native_import`) is unchanged by it.

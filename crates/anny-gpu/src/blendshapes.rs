@@ -74,6 +74,50 @@ fn to_f32(bytes: &[u8]) -> Vec<f32> {
         .collect()
 }
 
+/// Hand the bytes of a mapped readback buffer back to the caller.
+///
+/// Native waits on the device until wgpu pumps the mapping callback. The web
+/// backend has no blocking poll — the browser resolves the map from its own task
+/// queue — so there the mapping is awaited through a promise. Both are `async`
+/// so the call sites read the same on every target.
+#[cfg(not(target_arch = "wasm32"))]
+async fn readback(gpu: &Gpu, buffer: &wgpu::Buffer) -> Result<Vec<f32>, GpuError> {
+    let slice = buffer.slice(..);
+    let (tx, rx) = std::sync::mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read, move |r| {
+        let _ = tx.send(r);
+    });
+    gpu.device.poll(wgpu::PollType::Wait)?;
+    rx.recv().expect("mapping callback dropped")?;
+    let data = slice.get_mapped_range();
+    let out = to_f32(&data);
+    drop(data);
+    buffer.unmap();
+    Ok(out)
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn readback(gpu: &Gpu, buffer: &wgpu::Buffer) -> Result<Vec<f32>, GpuError> {
+    use wasm_bindgen::JsValue;
+    // The device is only needed for the native poll; the browser drives itself.
+    let _ = gpu;
+    let slice = buffer.slice(..);
+    let promise = js_sys::Promise::new(&mut |resolve, _reject| {
+        let resolve = resolve.clone();
+        slice.map_async(wgpu::MapMode::Read, move |r| {
+            let _ = resolve.call1(&JsValue::UNDEFINED, &JsValue::from(r.is_ok()));
+        });
+    });
+    wasm_bindgen_futures::JsFuture::from(promise)
+        .await
+        .map_err(|_| GpuError::WebReadback)?;
+    let data = slice.get_mapped_range();
+    let out = to_f32(&data);
+    drop(data);
+    buffer.unmap();
+    Ok(out)
+}
+
 impl Weights {
     /// Uploads the template and the full blendshape tensor once.
     pub fn upload(gpu: &Gpu, template: &[f32], blendshapes: &[f32], c: usize) -> Self {
@@ -101,7 +145,22 @@ impl Weights {
     }
 
     /// Poses the resident weights. Only the coefficients travel per call.
+    ///
+    /// Blocking wrapper; native only. The web backend has to await its readback,
+    /// so browsers go through [`run_async`](Self::run_async).
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn run(
+        &self,
+        gpu: &Gpu,
+        kernel: &BlendshapeKernel,
+        coefficients: &[f32],
+        batch: usize,
+    ) -> Result<Vec<f32>, GpuError> {
+        pollster::block_on(self.run_async(gpu, kernel, coefficients, batch))
+    }
+
+    /// Poses the resident weights on whichever backend is available.
+    pub async fn run_async(
         &self,
         gpu: &Gpu,
         kernel: &BlendshapeKernel,
@@ -179,18 +238,7 @@ impl Weights {
         encoder.copy_buffer_to_buffer(&out_buf, 0, &readback, 0, (out_len * 4) as u64);
         gpu.queue.submit(Some(encoder.finish()));
 
-        let slice = readback.slice(..);
-        let (tx, rx) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |r| {
-            let _ = tx.send(r);
-        });
-        gpu.device.poll(wgpu::PollType::Wait)?;
-        rx.recv().expect("mapping callback dropped")?;
-        let data = slice.get_mapped_range();
-        let out = to_f32(&data);
-        drop(data);
-        readback.unmap();
-        Ok(out)
+        self::readback(gpu, &readback).await
     }
 }
 
@@ -229,7 +277,24 @@ impl BlendshapeKernel {
     /// `template`/`blendshapes` are the flattened CPU tensors: template is
     /// `size` long, blendshapes is `c * size`, coefficients is `batch * c`.
     /// Returns `batch * size` values.
+    ///
+    /// Blocking wrapper; native only. Browsers use
+    /// [`run_async`](Self::run_async).
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn run(
+        &self,
+        gpu: &Gpu,
+        template: &[f32],
+        blendshapes: &[f32],
+        coefficients: &[f32],
+        batch: usize,
+        c: usize,
+    ) -> Result<Vec<f32>, GpuError> {
+        pollster::block_on(self.run_async(gpu, template, blendshapes, coefficients, batch, c))
+    }
+
+    /// The same contraction, awaiting the readback instead of blocking on it.
+    pub async fn run_async(
         &self,
         gpu: &Gpu,
         template: &[f32],
@@ -324,17 +389,6 @@ impl BlendshapeKernel {
         encoder.copy_buffer_to_buffer(&out_buf, 0, &readback, 0, (out_len * 4) as u64);
         gpu.queue.submit(Some(encoder.finish()));
 
-        let slice = readback.slice(..);
-        let (tx, rx) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |r| {
-            let _ = tx.send(r);
-        });
-        gpu.device.poll(wgpu::PollType::Wait)?;
-        rx.recv().expect("mapping callback dropped")?;
-        let data = slice.get_mapped_range();
-        let out = to_f32(&data);
-        drop(data);
-        readback.unmap();
-        Ok(out)
+        self::readback(gpu, &readback).await
     }
 }

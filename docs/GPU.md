@@ -108,14 +108,45 @@ not a deployment target.
 that never touched the GPU cannot be counted as a pass. Used for the validation runs above; without it the
 tests skip with an explicit `SKIP:` line.
 
+## Browser (WebGPU)
+
+`anny-gpu` builds for `wasm32-unknown-unknown` and drives the browser's own WebGPU: wgpu's `webgpu`
+feature replaces `vulkan` for the wasm target, `Gpu::open_async` takes the adapter from `navigator.gpu`,
+and each readback awaits a promise that the `map_async` callback resolves, because the web backend has no
+blocking poll. The native `Gpu::open*` / `run` entry points are thin `pollster` wrappers over the same
+async core, so nothing on the native path changed behaviour.
+
+No dependency bump was needed. wgpu 26.0.1's wasm dependencies are `js-sys = "0.3.77"`,
+`wasm-bindgen = "0.2.100"` and `wasm-bindgen-futures = "0.4.43"`; the first two are exactly what this
+workspace already pins. The earlier note in this file quoted `js-sys ^0.3.104` — that is wgpu **30**'s
+requirement, not the version in use, so the browser target was never blocked by that pin.
+
+Evidence — `examples/qualification/webgpu-smoke.cjs`, 7/7 checks in Google Chrome 152.0.7977.64
+(system Chrome via `CHROMIUM_PATH`, `--enable-unsafe-webgpu`), run against the same artifact the editor
+suite passes 14/14 with:
+
+| check | result |
+| --- | --- |
+| `navigator.gpu` | present |
+| exports | `cpu_blendshapes`, `gpu_blendshapes`, `default_coefficients`, `gpu_adapter_name` |
+| coefficient workload | 128/2496 nonzero (5.13%) — the same sparsity as natively |
+| GPU vs f32 CPU reference | **worst 0** at batch 4 (41,154 values per row), tolerance 1e-5 |
+| second run | worst 0 |
+| page errors | none (one favicon 404 ignored) |
+| adapter | name redacted by Chrome; reported as ` [BrowserWebGpu]` |
+
+The browser kernel is therefore **bit-identical** to the CPU reference in Chrome — the same result
+`llvmpipe` produced natively, which is what a correct port looks like. The browser timings in that run
+(GPU 474-788 ms cold / 408-513 ms warm against a 180-220 ms CPU reference at batch 4) are **not** a speed
+claim: each call re-uploads the ~103 MB blendshape tensor and batch 4 sits below the measured native
+crossover, exactly as the numbers above predict. The browser path is qualified for agreement, not speed.
+
+Cost: with the module enabled the browser artifact grows by **88,204 bytes** (86 KiB): `bg.wasm`
+2,232,949 → 2,321,153 bytes (+3.9%), measured by building once with `pub mod gpu;` disabled and running
+the same `wasm-bindgen` step on both.
+
 ## Not done (with reasons)
 
-- **Browser WebGPU.** The workspace pins `js-sys =0.3.77` / `wasm-bindgen =0.2.100` for
-  the browser-validated `anny-wasm` build (14/14). wgpu's web backend requires
-  `js-sys ^0.3.104`, so enabling it means bumping that pin and re-validating the
-  browser editor end to end. Until then `anny-gpu` is built `--no-default-features`
-  with `vulkan,wgsl` and has no wasm target. The kernel is WebGPU-shaped (WGSL,
-  bind groups, dispatch) so the port is an interface change, not a rewrite.
 - **Integration into `anny-cli` / the C API.** Nothing calls the GPU kernel yet, and on
   this evidence it should stay that way for the blendshape stage: it is a loss below
   batch ~16 for sparse coefficients and its ceiling even when free is 1.5-1.8x of
