@@ -89,7 +89,7 @@ the process exit code from that result.
 
 Editor controls are done: `AnnyCharacterEditor` drives generation from edit mode with the phenotype
 sliders and the mesh report, `AnnyPreset` captures and applies a configuration as an ordinary asset,
-and `AnnyBakeWindow` exposes the baker. EditMode is 26/26 with those covered, and the new groups are
+and `AnnyBakeWindow` exposes the baker. EditMode covers those groups and the suite is 34/34 overall, humanoid mappings included; the new groups are
 mutation-checked: dropping the preset's slider copy fails the round trip and removing the inspector's
 registration fails the inspector test.
 
@@ -129,13 +129,15 @@ RTX 3090 (FMA contraction in the shader) and bit-exact on llvmpipe, both inside 
 assert and below the 8.3e-7 the project already accepts between its own f32 and f64 paths.
 
 Timing on the RTX 3090, with both kernels skipping zero coefficients: the crossover depends on **realized
-sparsity**, not batch size alone. Real coefficients are sparse (the default character switches on 32 of 624,
-5.13%), and there the GPU is 0.04x at batch 1, crosses over near batch 16 and caps at 1.92x at 256 — while a
-workload that switches all 624 on reaches 5.50x at 16 and 17.13x at 256. Because the stage is only 0.14-0.19 ms
-of a 0.437 ms `rest_model`, even a free GPU stage could not exceed ~1.5-1.8x end-to-end.
+sparsity** as much as on batch size — 0.04x at batch 1 for the neutral character's 32 active coefficients,
+crossing over near batch 16 and capping at 1.92x at 256, while a workload that switches all 624 on reaches
+5.50x at 16 and 17.13x at 256. Both ends bracket the truth rather than predicting it: 32/624 is the *neutral*
+character, and coefficients from the shipped phenotype path activate 288/624 with all six phenotypes nudged
+by 0.02 and 352/624 when they are spread, so a varied batch lands between the two columns. Because the stage
+is only 0.14-0.19 ms of a 0.437 ms `rest_model`, even a free GPU stage could not exceed ~1.5-1.8x end-to-end.
 
 That is the reason the kernel stays unwired: it is a batch accelerator for dense coefficient workloads and a
-loss for typical sparse poses, and accelerating it alone cannot pay. The measured ceiling says any larger win
+loss below batch ~16 whatever the sparsity, and accelerating it alone cannot pay. The measured ceiling says any larger win
 has to come from a different stage (orientations/Procrustes/normals in `rest_model`, or the pose/skinning/export
 path), not from this contraction. A browser WebGPU target now exists as well and is qualified in the same
 file; it needed no dependency bump, because wgpu 26's web backend requires exactly the `js-sys`/`wasm-bindgen`
