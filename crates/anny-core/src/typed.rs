@@ -221,11 +221,14 @@ impl TensorF32 {
 impl TensorF32 {
     pub fn from_reference(t: &crate::Tensor) -> Result<Self> {
         t.validate()?;
-        let data: Vec<f32> = t.data.iter().map(|&x| x as f32).collect();
-        ensure(data.iter().all(|x| x.is_finite()), "value overflows f32")?;
+        let mut data = vec![0.; t.data.len()];
+        let (overflowed, inexact) = convert_checked(&t.data, &mut data, t.kind != Kind::Float);
+        // Same precedence and the same messages as the separate scans this replaces: the f32 range is
+        // reported before representability, whatever element order the chunks finished in.
+        ensure(!overflowed, "value overflows f32")?;
         if t.kind != Kind::Float {
             ensure(
-                data.iter().zip(&t.data).all(|(&a, &b)| a as f64 == b),
+                !inexact,
                 "discrete field is not exactly representable in f32",
             )?;
         }
@@ -246,6 +249,51 @@ impl TensorF32 {
             kind: self.kind,
         }
     }
+}
+
+/// Convert `source` into `out` for every core, reporting whether any value overflowed `f32` and, for
+/// discrete tensors, whether any value changed under the conversion.
+///
+/// The conversion and both checks used to be three separate passes over the model, and a model is
+/// hundreds of megabytes: the coefficients, the pose tensors and the blendshapes are all converted
+/// when a host asks for the f32 runtime. One pass now does all three, and it is split per core with
+/// each thread OR-ing its own two flags, which cannot change a value or the outcome.
+fn convert_checked(source: &[f64], out: &mut [f32], discrete: bool) -> (bool, bool) {
+    fn chunk(source: &[f64], out: &mut [f32], discrete: bool) -> (bool, bool) {
+        let (mut overflowed, mut inexact) = (false, false);
+        for (value, &x) in out.iter_mut().zip(source) {
+            let converted = x as f32;
+            overflowed |= !converted.is_finite();
+            inexact |= discrete && converted as f64 != x;
+            *value = converted;
+        }
+        (overflowed, inexact)
+    }
+    const PARALLEL_CONVERT_ELEMENTS: usize = 1 << 16;
+    if out.len() < PARALLEL_CONVERT_ELEMENTS {
+        return chunk(source, out, discrete);
+    }
+    let threads = std::thread::available_parallelism()
+        .map_or(1, std::num::NonZeroUsize::get)
+        .min(out.len().div_ceil(PARALLEL_CONVERT_ELEMENTS))
+        .max(1);
+    let per = out.len().div_ceil(threads);
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = source
+            .chunks(per)
+            .zip(out.chunks_mut(per))
+            .map(|(source, out)| scope.spawn(move || chunk(source, out, discrete)))
+            .collect();
+        let mut overflowed = false;
+        let mut inexact = false;
+        for handle in handles {
+            let (thread_overflowed, thread_inexact) =
+                handle.join().expect("conversion thread panicked");
+            overflowed |= thread_overflowed;
+            inexact |= thread_inexact;
+        }
+        (overflowed, inexact)
+    })
 }
 
 #[derive(Clone, Debug)]

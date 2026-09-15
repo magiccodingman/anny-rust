@@ -155,6 +155,7 @@ unaffected: it keys on config plus asset fingerprint and verifies the sha256 it 
 | `prepare default (cold)` | 222.905 ms | 223.763 ms |
 | `reload prepared f32 bytes` (104.1 MB payload) | 29.480 ms | 30.578 ms |
 | `reload prepared f64 bytes` (205.9 MB payload) | 66.106 ms | 70.650 ms |
+| `convert f64 model to f32` (f32 host import) | 57.332 ms | 58.349 ms |
 | `generate f64 default` | 0.572 ms | 0.600 ms |
 | `generate f64 dqs` | 1.331 ms | 1.443 ms |
 | `generate f64 makehuman rig` | 0.559 ms | 0.648 ms |
@@ -318,6 +319,17 @@ element boundary, and every element is written by exactly one thread. The oracle
 the prepared-payload tensor digest, and unchanged values in both C smokes and the .NET example. Both rows
 now move ~208 MB and ~412 MB at ~7 GB/s and ~6 GB/s, which points at memory bandwidth rather than
 arithmetic as the next limit — inference from two data points, not a measurement.
+
+The f64 → f32 model conversion that an f32 host runs on import was the same shape of problem in a
+different place: `TensorF32::from_reference` converted the elements, then scanned the result for
+finiteness, then scanned it again for exact representability on discrete tensors, then validated it —
+four passes over a model whose blendshapes alone are hundreds of megabytes. The conversion and both
+checks are now one pass, split per core, with each thread combining its own flags. **104.824/105.218 →
+57.332/58.349 ms (1.82x).** The checks kept their precedence (the f32 range is reported before
+representability) and their exact messages, so a caller sees the same error for the same input:
+`tests/typed_runtime.rs` pins both error cases, the prepared-payload digest covers the converted bytes
+(as it is produced through `to_f32`), and the f32 error figures in both C smokes and the .NET example
+are unchanged to the last digit.
 
 ## Ranking of remaining work, by measured upside
 

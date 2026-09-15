@@ -166,6 +166,14 @@ fn main() -> Result<()> {
     })?;
     report("prepare", "reload prepared f64 bytes", 5, &stats);
 
+    // f64 -> f32 model conversion: what an f32 host runs when it is handed f64 model bytes.
+    let stats = measure(5, 1, || {
+        let typed = prepared.to_f32()?;
+        black_box(typed.data().vertex_count());
+        Ok(())
+    })?;
+    report("typed", "convert f64 model to f32", 5, &stats);
+
     // Forward evaluation across the configurations that matter for games and tools.
     let configurations = vec![
         ("f64 default", default.clone()),
