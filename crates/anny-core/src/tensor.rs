@@ -244,6 +244,53 @@ impl Tensor {
     }
 }
 
+/// Re-emit a serialized archive's header with its keys in sorted order.
+///
+/// `safetensors` writes `__metadata__` straight out of a `HashMap`, whose iteration order `std` seeds
+/// randomly per process, so the same archive serialized in two processes did not match byte for byte.
+/// Sorting the header makes every payload the crate writes reproducible; the tensor region is copied
+/// verbatim, so no offset, dtype or value changes.
+pub(crate) fn sorted_metadata_header(bytes: Vec<u8>) -> Result<Vec<u8>> {
+    ensure(
+        bytes.len() >= 8,
+        "serialized archive is shorter than its header",
+    )?;
+    let header_len = u64::from_le_bytes(bytes[..8].try_into().expect("8 bytes")) as usize;
+    ensure(
+        bytes.len() >= 8 + header_len,
+        "serialized archive header is truncated",
+    )?;
+    let header: Value = serde_json::from_slice(&bytes[8..8 + header_len])?;
+    ensure(header.is_object(), "archive header is not an object")?;
+    // Every object on the way down, not just the top level: `__metadata__` is itself a map whose
+    // order the crate took from a `HashMap`.
+    let mut sorted = serde_json::to_vec(&canonical(&header))?;
+    // The format requires the JSON header to be a multiple of 8 bytes, space padded.
+    sorted.resize(sorted.len().div_ceil(8) * 8, b' ');
+    let mut out = Vec::with_capacity(sorted.len() + bytes.len() - header_len);
+    out.extend_from_slice(&(sorted.len() as u64).to_le_bytes());
+    out.extend_from_slice(&sorted);
+    out.extend_from_slice(&bytes[8 + header_len..]);
+    Ok(out)
+}
+
+/// `Value` with every object's keys in sorted order, at every depth.
+///
+/// Entries are collected into a sorted `Vec` before rebuilding the map so the result does not
+/// depend on whether `serde_json` preserves insertion order.
+pub(crate) fn canonical(value: &Value) -> Value {
+    match value {
+        Value::Object(map) => {
+            let mut entries: Vec<(String, Value)> =
+                map.iter().map(|(k, v)| (k.clone(), canonical(v))).collect();
+            entries.sort_by(|left, right| left.0.cmp(&right.0));
+            Value::Object(entries.into_iter().collect())
+        }
+        Value::Array(items) => Value::Array(items.iter().map(canonical).collect()),
+        other => other.clone(),
+    }
+}
+
 /// Also handles the one-time converter's nested state-dictionary envelope.
 #[derive(Clone, Debug, Default)]
 pub struct Archive {
@@ -320,7 +367,7 @@ impl Archive {
                 Ok(((*n).clone(), TensorView::new(dtype, t.shape.clone(), b)?))
             })
             .collect::<Result<Vec<_>>>()?;
-        Ok(safetensors::serialize(views, &Some(self.metadata.clone()))?)
+        sorted_metadata_header(safetensors::serialize(views, &Some(self.metadata.clone()))?)
     }
     pub fn save(&self, path: impl AsRef<std::path::Path>) -> Result<()> {
         std::fs::write(path, self.to_bytes()?)?;

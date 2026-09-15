@@ -639,7 +639,7 @@ fn serialize(
         .iter()
         .map(|(n, s, d, b)| Ok(((*n).clone(), TensorView::new(*d, s.clone(), b)?)))
         .collect::<Result<Vec<_>>>()?;
-    Ok(safetensors::serialize(views, &Some(metadata))?)
+    crate::tensor::sorted_metadata_header(safetensors::serialize(views, &Some(metadata))?)
 }
 
 pub mod math {

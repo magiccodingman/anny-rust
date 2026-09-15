@@ -1,7 +1,8 @@
 //! The prepared payload is assembled by a parallel target loader and a parallel gather over the
 //! kept vertices, so what has to be pinned is the *content* it produces, not the bytes of the file:
-//! the safetensors header's `__metadata__` is a `HashMap` whose JSON key order follows the process
-//! hash seed, which makes whole-file digests differ between runs of the same binary.
+//! this digest covers the tensor region only, which no header formatting can affect. (Whole-file
+//! byte-identity across processes is a separate, now-guaranteed property, tested in
+//! `payload_determinism.rs`.)
 //!
 //! This digest was recorded from the sequential loader before the loads were parallelised, so it
 //! fails if any of them changes a single element, or reorders the shapes, labels or masks.

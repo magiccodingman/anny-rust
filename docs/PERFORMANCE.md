@@ -135,18 +135,27 @@ Equivalence evidence, since "same output" is the entire point:
 - The bench rows outside the prepare group are unchanged, so nothing here traded against generation or
   the session path.
 
-### The serialized payload is not byte-reproducible, and that matters for how it is tested
+### The serialized payload is byte-reproducible now; the tensor region is still what gets pinned
 
-Setting up that comparison produced a *different* whole-file digest on every run of the same binary.
-The cause is not the parallel loader: `Anny::archive` and `AnnyF32::to_bytes` build the safetensors
-`__metadata__` map as a `std::collections::HashMap`, and `safetensors::serialize` iterates that map, so
-the header's JSON key order follows the process's random hash seed. The tensors themselves are
-deterministic — `Archive::tensors` is a `BTreeMap` — and across every run compared, all 14 payload
-tensors were identical.
+Setting up that comparison produced a *different* whole-file digest on every run of the same binary, and
+the cause was not the parallel loader: `safetensors::serialize` writes `__metadata__` straight out of a
+`HashMap`, so the header's JSON key order followed the process's random hash seed. The tensors themselves
+were always deterministic — `Archive::tensors` is a `BTreeMap` — and all 14 payload tensors were identical
+across every run compared.
 
-So a whole-file digest is not a usable oracle for this artifact; compare the tensor region or per-tensor
-hashes instead. Two builds of one configuration differ in header bytes only. The prepared-model cache is
-unaffected: it keys on config plus asset fingerprint and verifies the sha256 it wrote itself.
+That is fixed at the writer, not worked around in the test: every write goes through
+`tensor::sorted_metadata_header`, which re-emits the header with the keys of every nested object sorted
+(the tensor region is copied verbatim, so no offset, dtype or value moves). All three writers — `Archive`,
+`ArchiveF32` and the upstream-port archive — go through it. Verified by stashing the fix and rebuilding:
+on the old code three separate `prepare` runs produce three digests, on the new code one; a pre-fix and a
+post-fix payload have the same header length, the same metadata and byte-equal values in all 14 tensors,
+and the reference Python `safetensors` reader opens the rewritten file. `tests/payload_determinism.rs`
+keeps it honest by spawning two child processes, because no single process can observe a per-process hash
+seed.
+
+The equivalence test still pins the *tensor region* rather than the whole file (`tests/prepare_equivalence.rs`,
+digest `582aec10…`): that digest survives any future header change, which is what makes it a useful oracle
+for the payload content. Whole-file digests are now reproducible if you want them.
 
 Every number below was measured on the native x86-64 build (32 hardware threads). The `wasm32` build of
 the same code cannot create threads: `std::thread` compiles there but panics when a thread is actually

@@ -3,7 +3,7 @@
 Local validation against the pinned source, recorded September 13, 2026.
 
 - `cargo fmt --all -- --check`: passed.
-- `cargo test --workspace`: 96 tests passed, 0 failed (8 of them C ABI, including the pose-session equivalence tests); 15 data-dependent cases are `#[ignore]`d and were run separately against `data/`.
+- `cargo test --release --workspace -- --include-ignored`: 113 tests passed, 0 failed (8 of them C ABI, including the pose-session equivalence tests); 16 of the 113 are data-dependent cases that are `#[ignore]`d by default and were run here against `data/`.
 - `cargo clippy --workspace --all-targets -- -D warnings`: passed.
 - `cargo build -p anny-wasm --target wasm32-unknown-unknown`: passed, including the pose-session classes.
 - The WebAssembly classes are **executed** under Node (`wasm-bindgen --target nodejs`, then
@@ -13,6 +13,7 @@ Local validation against the pinned source, recorded September 13, 2026.
   but panics when a thread is created — the parallel helpers now take their sequential path on wasm32.
 - Full-model Python-reference parity: **23/23 passed**, absolute tolerance 1e-6, relative tolerance 0. Integer arrays and labels are exact.
 - Prepared Safetensors model -> native reload -> reference comparison: passed.
+- Written payloads are byte-identical across processes for both writers (`tests/payload_determinism.rs`, which spawns two child processes because a per-process hash seed cannot be observed from inside one). Only the header changed: a pre-fix and a post-fix payload carry the same metadata, have the same header length, and all 14 tensors compare equal — and the reference Python `safetensors` reader opens the rewritten file.
 - Real C executables calling ABI 1 generated 13,718 vertices / 27,420 faces from imported assets, and pose sessions matched `evaluate` exactly (f64 and f32), including after the model handle was freed. The .NET example asserts the same for both managed session wrappers.
 - Native two-iteration fitting smoke completed on real default-mesh data; resulting mean vertex error 0.0082489114 m. This is a functional smoke, not optimizer trajectory parity or a convergence benchmark.
 - Native calibrated sampling read the original distributions and generated valid parameters from seed 42.

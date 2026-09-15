@@ -175,6 +175,7 @@
     "rust": "1.90.0"
   },
   "cache_reload_passed": true,
+  "payload_reproducible": "the same build writes byte-identical prepared payloads (f64 and f32) in every process; the safetensors header is re-emitted with its keys sorted because the crate serializes __metadata__ straight out of a HashMap",
   "c_abi_smoke": "ABI 1: 13718 vertices, 27420 faces; pose sessions match evaluate exactly (f64+f32) and survive anny_model_free",
   "wasm_compilation_passed": true,
   "wasm_node_execution_passed": "pose sessions (f64 and f32) match evaluate exactly and survive their model being freed",
