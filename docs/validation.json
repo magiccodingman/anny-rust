@@ -178,6 +178,7 @@
   "c_abi_smoke": "ABI 1: 13718 vertices, 27420 faces; pose sessions match evaluate exactly (f64+f32) and survive anny_model_free",
   "wasm_compilation_passed": true,
   "wasm_node_execution_passed": "pose sessions (f64 and f32) match evaluate exactly and survive their model being freed",
-  "browser_execution_tested": false,
+  "browser_execution_tested": true,
+  "browser_execution": "Chromium 145.0.7632.6 through examples/qualification/browser.cjs (developer-only, not run by CI): full smoke passed with no page errors, including the f64 and f32 pose sessions matching evaluate exactly and surviving their model being freed",
   "real_smpl_assets_tested": false
 }

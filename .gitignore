@@ -11,3 +11,4 @@ examples/csharp/bin/
 examples/csharp/obj/
 # data/ is deliberately NOT ignored: import and commit the pinned source assets.
 # Do not ignore all *.safetensors: converted source assets must remain trackable.
+examples/qualification/node_modules/

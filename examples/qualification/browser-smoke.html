@@ -79,7 +79,35 @@ try {
   const regenerated = own(reloaded.evaluate(parameters));
   const again = regenerated.tensor('vertices');
   check(first.every((x, i) => again[i] === x), 'prepared model reload is deterministic');
-  window.__anny_result = {status: 'passed', checks, vertices: shape[1], indexEntries: faces.length, maxPositionError: maxError};
+  // A pose session pays only for the pose-dependent half, so it has to agree with `evaluate`
+  // exactly, and it owns its reference to the model.
+  const pose = {root: [[1, 0, 0, 0.2], [0, 0.9396926, 0.3420201, -0.15], [0, -0.3420201, 0.9396926, 0.05], [0, 0, 0, 1]]};
+  const poseJson = JSON.stringify(pose);
+  const posedParameters = JSON.stringify({pose_parameters: pose});
+  const posedReference = own(reloaded.evaluate(posedParameters));
+  const session = own(reloaded.pose_session(posedParameters));
+  session.update(poseJson);
+  const sessionVertices = session.tensor('vertices');
+  const referenceVertices = posedReference.tensor('vertices');
+  check(sessionVertices instanceof Float64Array && sessionVertices.length === referenceVertices.length &&
+    sessionVertices.every((x, i) => x === referenceVertices[i]), 'f64 pose session matches evaluate exactly');
+  check(session.coefficients().length > 0, 'pose session exposes its coefficients');
+  const sessionSnapshot = Float64Array.from(sessionVertices);
+  const singlePosed = own(reloaded.to_f32());
+  const singlePosedReference = own(singlePosed.evaluate(posedParameters));
+  const singleSession = own(singlePosed.pose_session(posedParameters));
+  singleSession.update(poseJson);
+  const singleSessionVertices = singleSession.tensor('vertices');
+  const singleReferenceVertices = singlePosedReference.tensor('vertices');
+  check(singleSessionVertices instanceof Float32Array && singleSessionVertices.length === singleReferenceVertices.length &&
+    singleSessionVertices.every((x, i) => x === singleReferenceVertices[i]), 'f32 pose session matches evaluate exactly');
+  const singleSessionSnapshot = Float32Array.from(singleSessionVertices);
+  dispose(posedReference); dispose(singlePosedReference); dispose(singlePosed); dispose(reloaded);
+  session.update(poseJson);
+  check(session.tensor('vertices').every((x, i) => x === sessionSnapshot[i]), 'f64 pose session survives its model being freed');
+  singleSession.update(poseJson);
+  check(singleSession.tensor('vertices').every((x, i) => x === singleSessionSnapshot[i]), 'f32 pose session survives its model being freed');
+  window.__anny_result = {status: 'passed', checks, vertices: shape[1], indexEntries: faces.length, maxPositionError: maxError, sessionVertices: sessionSnapshot.length};
 } catch (error) {
   window.__anny_result = {status: 'failed', checks, error: String(error), stack: error?.stack};
 } finally {

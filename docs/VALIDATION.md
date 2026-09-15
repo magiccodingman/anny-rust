@@ -54,8 +54,38 @@ use `tools/export_reference.py --cases all-cases` in the original Python Anny
 environment, then `tools/check_parity.py`. The lightweight fixture runner fails
 on missing inputs and does not regenerate reference answers with the Rust code.
 
-Not verified here: execution in an actual browser (the WebAssembly classes run under
-Node instead) and browser performance, real licensed SMPL or SMPL-X assets, GPU
+Verified here as well: the WebAssembly classes run in an actual browser — Chromium 145.0.7632.6
+through `examples/qualification/browser.cjs`, the full smoke with no page errors, including the f64 and
+f32 pose sessions matching `evaluate` exactly and surviving their model being freed. That check is
+developer-only (it downloads Chromium) and CI runs the Node equivalent instead.
+
+Not verified here: browser *performance*, real licensed SMPL or SMPL-X assets, GPU
 implementations, exhaustive collision equivalence, or complete iterative optimizer
 equivalence. CI separately checks Windows/macOS builds and
 the C# example; a checked-in validation record does not assert future CI results.
+
+## Running the WebAssembly checks yourself
+
+`wasm-bindgen` must match the version in `Cargo.lock`, and both checks need bindings generated into a
+directory (`examples/browser/pkg` is git-ignored):
+
+```sh
+version=$(awk '/^name = "wasm-bindgen"$/{getline; gsub(/[^0-9.]/, ""); print; exit}' Cargo.lock)
+curl -sSL -o /tmp/wb.tar.gz "https://github.com/rustwasm/wasm-bindgen/releases/download/$version/wasm-bindgen-$version-x86_64-unknown-linux-musl.tar.gz"
+tar xzf /tmp/wb.tar.gz -C /tmp
+install -m 755 /tmp/wasm-bindgen-$version-x86_64-unknown-linux-musl/wasm-bindgen ~/.cargo/bin/
+cargo build --release --locked --target wasm32-unknown-unknown -p anny-wasm
+
+# Node: the bindings execute, no browser involved. This is the check CI runs.
+wasm-bindgen target/wasm32-unknown-unknown/release/anny_wasm.wasm --target nodejs --out-dir output/wasm-node
+node examples/qualification/wasm-node-smoke.cjs output/wasm-node output/ci-model.safetensors
+
+# Browser (developer-only, downloads Chromium): the same checks plus the glTF authoring pass.
+wasm-bindgen target/wasm32-unknown-unknown/release/anny_wasm.wasm --target web --out-dir examples/browser/pkg
+cd examples/qualification && npm install && npx playwright install chromium && node browser.cjs
+```
+
+Playwright 1.51 asks for a *headless shell* download that a plain `install chromium` may not fetch; if
+launch fails with `chromium_headless_shell-<rev>` missing, point it at a full Chromium instead: the
+harness honours `CHROMIUM_PATH`, and `~/.cache/ms-playwright/chromium-*/chrome-linux/chrome` works.
+The browser check needs the archive `anny prepare` writes (`output/ci-model.safetensors` here).
