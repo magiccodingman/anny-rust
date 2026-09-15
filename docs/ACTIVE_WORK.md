@@ -47,7 +47,7 @@ The following remain the major successor workstream:
 4. Complete browser character editor.
 5. Serious profiling-driven performance optimization.
 
-Progress against that list is recorded in `docs/PERFORMANCE.md`: the prepare/reload, tensor-decode, precision-conversion and collision hot paths are done (9.6×, 2.1×, 1.82×, and 2.3× on the BVH build that dominated the remaining collision frame); the pose session is reachable from Rust, the CLI, C, C#, the WASM bindings and the browser; the serialized payload is byte-reproducible across processes; and the browser editor is built and passes 14 checks in a real Chromium (`examples/qualification/editor-smoke.cjs`). Zero-copy loading is decided rather than pending, and declined, in the section of `docs/PERFORMANCE.md` that states what an mmap path would preserve and what a trusted/prevalidated artifact path would have to be. GPU/WebGPU, SIMD and Unity remain — Unity needs editor tooling and a licence path that this environment does not have.
+Progress against that list is recorded in `docs/PERFORMANCE.md`: the prepare/reload, tensor-decode, precision-conversion and collision hot paths are done (9.6×, 2.1×, 1.82×, and 2.3× on the BVH build that dominated the remaining collision frame); the pose session is reachable from Rust, the CLI, C, C#, the WASM bindings and the browser; the serialized payload is byte-reproducible across processes; and the browser editor is built and passes 14 checks in a real Chromium (`examples/qualification/editor-smoke.cjs`). Zero-copy loading is decided rather than pending, and declined, in the section of `docs/PERFORMANCE.md` that states what an mmap path would preserve and what a trusted/prevalidated artifact path would have to be. Since then Unity has been integrated against the real installed editor and both Linux players build and run; GPU/WebGPU and the remaining CPU work are what is left.
 
 Optional future work also includes CUDA/ROCm-specialized backends and qualification with user-supplied licensed SMPL/SMPL-X/AMASS data.
 
@@ -55,16 +55,22 @@ Optional future work also includes CUDA/ROCm-specialized backends and qualificat
 
 If further agentic work is performed in a transient browser environment, keep using small ordinary source commits and PR comments as durable handoff. Do not accumulate large local-only deltas. If GitHub writes temporarily fail, retry shortly; if they remain unavailable, stop and involve the owner.
 
-### Unity is integrated and validated in the editor
+### Unity is integrated, validated in the editor, and now in real players
 
 `integrations/unity/` holds UPM package `com.magiccodingman.anny` (native plugin, runtime, editor
 tooling, tests) plus the host project the tests run in. EditMode 21/21 and PlayMode 5/5 pass against
 the real editor and a real model; see VALIDATION.md for the numbers and the two defects the runs found.
 
+Both Linux players build and run (`tools/build-players.sh`). Mono and IL2CPP generate the same
+character through the native plugin — 13,718 source vertices, 82,260 mesh vertices, 27,420 triangles,
+104 bones, 9 influences, signed volume equal to the last float digit — so the P/Invoke marshalling,
+`SafeHandle` lifetimes and tensor readers behave identically under IL2CPP. A player that builds but
+does not run proves nothing, which is why the smoke behaviour asserts the generated character and sets
+the process exit code from that result.
+
 Still open, in dependency order:
 
-1. **Player builds**: Linux Mono and Linux IL2CPP, then WebGL. This is the only thing that exercises the
-   plugin under IL2CPP marshalling and a shipped data layout, so it is the next item.
-2. Editor controls: custom inspector, presets, bake window UI (the baker itself is done and tested).
-3. Physics integration (`MeshCollider` from generated geometry) and animation/avatar retargeting.
+1. Editor controls: custom inspector, presets, bake window UI (the baker itself is done and tested).
+2. Physics integration (`MeshCollider` from generated geometry) and animation/avatar retargeting.
+3. WebGL player build, which needs the wasm bindings rather than the cdylib the other two use.
 4. GPU/WebGPU and the remaining CPU work.

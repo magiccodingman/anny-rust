@@ -104,6 +104,25 @@ launch fails with `chromium_headless_shell-<rev>` missing, point it at a full Ch
 harness honours `CHROMIUM_PATH`, and `~/.cache/ms-playwright/chromium-*/chrome-linux/chrome` works.
 The browser check needs the archive `anny prepare` writes (`output/ci-model.safetensors` here).
 
+### Players, not just the editor
+
+`integrations/unity/tools/build-players.sh` builds both Linux players and runs each one, which is the
+only surface that exercises the native plugin outside the editor. The generated scene is built by
+`PlayerBuild.cs`; the behaviour inside the player is `PlayerSmoke.cs`, which reads the model from
+`ANNY_MODEL`, generates the character through the plugin, asserts the mesh, influence width, skeleton
+and renderer, prints one line and exits with a status code.
+
+| Player | Build | Ran | Result |
+| --- | --- | --- | --- |
+| Linux Mono | Succeeded, 97,037,827 B | yes | `vertices=13718 meshverts=82260 tris=27420 bones=104 influences=9 volume=0.05101393` |
+| Linux IL2CPP | Succeeded, 284,477,938 B | yes | `vertices=13718 meshverts=82260 tris=27420 bones=104 influences=9 volume=0.05101392` |
+
+Both backends produce the same geometry, topology, influence width, bone count and signed volume; the
+signed volume differs in the last float digit only. The marshalling of the tensor views, the
+`SafeHandle` lifetimes and the readers therefore behave the same under IL2CPP as under Mono. A player
+build that compiles but does not run proves nothing, which is why the smoke behaviour asserts the
+generated character and sets the exit code from that result.
+
 ## Unity integration
 
 The Unity package is validated by running the installed editor headlessly, not by inspecting it.

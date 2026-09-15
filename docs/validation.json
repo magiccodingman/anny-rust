@@ -1,214 +1,244 @@
 {
- "upstream_revision": "81ca83e202273b306205c1cc15f33734be31e48c",
- "reference_data_version": 11,
- "atol": 1e-06,
- "rtol": 0,
- "cases": [
-  {
-   "case": "all",
-   "passed": true,
-   "maximum_array_error": 6.505573432953114e-11,
-   "maximum_vertex_error": 8.079044377939937e-12,
-   "exact_index_and_label_checks": true
+  "upstream_revision": "81ca83e202273b306205c1cc15f33734be31e48c",
+  "reference_data_version": 11,
+  "atol": 1e-06,
+  "rtol": 0,
+  "cases": [
+    {
+      "case": "all",
+      "passed": true,
+      "maximum_array_error": 6.505573432953114e-11,
+      "maximum_vertex_error": 8.079044377939937e-12,
+      "exact_index_and_label_checks": true
+    },
+    {
+      "case": "batch",
+      "passed": true,
+      "maximum_array_error": 7.221172505645455e-12,
+      "maximum_vertex_error": 1.856948622647181e-12,
+      "exact_index_and_label_checks": true
+    },
+    {
+      "case": "cmu_mb",
+      "passed": true,
+      "maximum_array_error": 1.7095782878229215e-07,
+      "maximum_vertex_error": 2.5262895525512974e-08,
+      "exact_index_and_label_checks": true
+    },
+    {
+      "case": "default",
+      "passed": true,
+      "maximum_array_error": 3.389926679988635e-09,
+      "maximum_vertex_error": 6.348477317843007e-10,
+      "exact_index_and_label_checks": true
+    },
+    {
+      "case": "dqs",
+      "passed": true,
+      "maximum_array_error": 9.031874206866242e-10,
+      "maximum_vertex_error": 9.031874206866242e-10,
+      "exact_index_and_label_checks": true
+    },
+    {
+      "case": "extrapolate",
+      "passed": true,
+      "maximum_array_error": 1.9630943987999e-09,
+      "maximum_vertex_error": 3.7011663872599243e-10,
+      "exact_index_and_label_checks": true
+    },
+    {
+      "case": "game_engine",
+      "passed": true,
+      "maximum_array_error": 4.182227785198833e-07,
+      "maximum_vertex_error": 5.679458414675764e-08,
+      "exact_index_and_label_checks": true
+    },
+    {
+      "case": "hand_left",
+      "passed": true,
+      "maximum_array_error": 4.440892098500626e-15,
+      "maximum_vertex_error": 1.6930901125533637e-15,
+      "exact_index_and_label_checks": true
+    },
+    {
+      "case": "hand_right",
+      "passed": true,
+      "maximum_array_error": 3.9968028886505635e-15,
+      "maximum_vertex_error": 2.115061598084722e-15,
+      "exact_index_and_label_checks": true
+    },
+    {
+      "case": "head",
+      "passed": true,
+      "maximum_array_error": 1.1189937865196953e-12,
+      "maximum_vertex_error": 1.942890293094024e-15,
+      "exact_index_and_label_checks": true
+    },
+    {
+      "case": "local_bone",
+      "passed": true,
+      "maximum_array_error": 1.58089063157745e-09,
+      "maximum_vertex_error": 2.9452057459522507e-10,
+      "exact_index_and_label_checks": true
+    },
+    {
+      "case": "local_bone_world",
+      "passed": true,
+      "maximum_array_error": 1.58089063157745e-09,
+      "maximum_vertex_error": 2.9452057459522507e-10,
+      "exact_index_and_label_checks": true
+    },
+    {
+      "case": "makehuman",
+      "passed": true,
+      "maximum_array_error": 7.053356606556704e-07,
+      "maximum_vertex_error": 6.819054750861753e-07,
+      "exact_index_and_label_checks": true
+    },
+    {
+      "case": "mixamo",
+      "passed": true,
+      "maximum_array_error": 9.136938947662543e-07,
+      "maximum_vertex_error": 1.1787916176508872e-07,
+      "exact_index_and_label_checks": true
+    },
+    {
+      "case": "notoes",
+      "passed": true,
+      "maximum_array_error": 1.58089063157745e-09,
+      "maximum_vertex_error": 2.9137144780255753e-10,
+      "exact_index_and_label_checks": true
+    },
+    {
+      "case": "procrustes",
+      "passed": true,
+      "maximum_array_error": 9.698107195088568e-08,
+      "maximum_vertex_error": 7.549516567451064e-15,
+      "exact_index_and_label_checks": true
+    },
+    {
+      "case": "pruned",
+      "passed": true,
+      "maximum_array_error": 1.58089063157745e-09,
+      "maximum_vertex_error": 2.935606566861759e-10,
+      "exact_index_and_label_checks": true
+    },
+    {
+      "case": "quads",
+      "passed": true,
+      "maximum_array_error": 1.58089063157745e-09,
+      "maximum_vertex_error": 2.91371449537281e-10,
+      "exact_index_and_label_checks": true
+    },
+    {
+      "case": "soma",
+      "passed": true,
+      "maximum_array_error": 3.683164884193957e-14,
+      "maximum_vertex_error": 2.55351295663786e-15,
+      "exact_index_and_label_checks": true
+    },
+    {
+      "case": "soma_anny",
+      "passed": true,
+      "maximum_array_error": 3.683164884193957e-14,
+      "maximum_vertex_error": 2.55351295663786e-15,
+      "exact_index_and_label_checks": true
+    },
+    {
+      "case": "soma_topology",
+      "passed": true,
+      "maximum_array_error": 1.58089063157745e-09,
+      "maximum_vertex_error": 2.912801111421004e-10,
+      "exact_index_and_label_checks": true
+    },
+    {
+      "case": "world",
+      "passed": true,
+      "maximum_array_error": 1.58089063157745e-09,
+      "maximum_vertex_error": 3.1559800519470604e-10,
+      "exact_index_and_label_checks": true
+    },
+    {
+      "case": "world_orient",
+      "passed": true,
+      "maximum_array_error": 1.58089063157745e-09,
+      "maximum_vertex_error": 3.14808082380047e-10,
+      "exact_index_and_label_checks": true
+    }
+  ],
+  "native_tests": 111,
+  "reference_environment": {
+    "python": "3.13.5",
+    "torch": "2.10.0+cpu",
+    "roma": "1.6.1",
+    "warp": "1.9.1",
+    "rust": "1.90.0"
   },
-  {
-   "case": "batch",
-   "passed": true,
-   "maximum_array_error": 7.221172505645455e-12,
-   "maximum_vertex_error": 1.856948622647181e-12,
-   "exact_index_and_label_checks": true
+  "cache_reload_passed": true,
+  "payload_reproducible": "the same build writes byte-identical prepared payloads (f64 and f32) in every process; the safetensors header is re-emitted with its keys sorted because the crate serializes __metadata__ straight out of a HashMap",
+  "c_abi_smoke": "ABI 1: 13718 vertices, 27420 faces; pose sessions match evaluate exactly (f64+f32) and survive anny_model_free",
+  "wasm_compilation_passed": true,
+  "wasm_node_execution_passed": "pose sessions (f64 and f32) match evaluate exactly and survive their model being freed",
+  "browser_execution_tested": true,
+  "browser_execution": "Chromium 145.0.7632.6 through examples/qualification/browser.cjs (developer-only, not run by CI): full smoke passed with no page errors, including the f64 and f32 pose sessions matching evaluate exactly and surviving their model being freed",
+  "browser_editor_tested": true,
+  "browser_editor_execution": "Chromium 145.0.7632.6 through examples/qualification/editor-smoke.cjs (developer-only, not run by CI): 14/14 checks passed with no page errors and a clean console - panels built from describe(), a panel slider that moves the mesh, the same parameter through the editor's own entry point, posing through the pose session, an exact return to rest, GLB export accepted by the official glTF validator (0 errors, skins present), state save/load round trip, seeded randomisation, a texture applied to the material, clip playback, and 27,420 triangles drawn",
+  "real_smpl_assets_tested": false,
+  "unity_tested": true,
+  "unity_editor": "6000.6.0f1",
+  "unity_editmode": {
+    "total": 21,
+    "passed": 21,
+    "failed": 0,
+    "compiler": "Roslyn via the Unity editor",
+    "note": "real geometry from output/ci-model.safetensors; includes the bake-to-assets workflow"
   },
-  {
-   "case": "cmu_mb",
-   "passed": true,
-   "maximum_array_error": 1.7095782878229215e-07,
-   "maximum_vertex_error": 2.5262895525512974e-08,
-   "exact_index_and_label_checks": true
+  "unity_playmode": {
+    "total": 5,
+    "passed": 5,
+    "failed": 0,
+    "session_update_ms": 0.4434,
+    "full_evaluation_ms": 0.7896,
+    "moved_vertices": 27436,
+    "largest_movement_m": 0.229793
   },
-  {
-   "case": "default",
-   "passed": true,
-   "maximum_array_error": 3.389926679988635e-09,
-   "maximum_vertex_error": 6.348477317843007e-10,
-   "exact_index_and_label_checks": true
+  "unity_exactness": {
+    "mesh_vs_native_array_m": 0.0,
+    "single_precision_vs_wide_m": 5e-07,
+    "skinning_identity_at_bind_pose_m": 3.3e-07,
+    "unity_bake_vs_native_vertices_m": 6.24606e-07,
+    "quality_level": "Ultra",
+    "skin_weights": "Unlimited",
+    "influences_per_vertex": 9
   },
-  {
-   "case": "dqs",
-   "passed": true,
-   "maximum_array_error": 9.031874206866242e-10,
-   "maximum_vertex_error": 9.031874206866242e-10,
-   "exact_index_and_label_checks": true
-  },
-  {
-   "case": "extrapolate",
-   "passed": true,
-   "maximum_array_error": 1.9630943987999e-09,
-   "maximum_vertex_error": 3.7011663872599243e-10,
-   "exact_index_and_label_checks": true
-  },
-  {
-   "case": "game_engine",
-   "passed": true,
-   "maximum_array_error": 4.182227785198833e-07,
-   "maximum_vertex_error": 5.679458414675764e-08,
-   "exact_index_and_label_checks": true
-  },
-  {
-   "case": "hand_left",
-   "passed": true,
-   "maximum_array_error": 4.440892098500626e-15,
-   "maximum_vertex_error": 1.6930901125533637e-15,
-   "exact_index_and_label_checks": true
-  },
-  {
-   "case": "hand_right",
-   "passed": true,
-   "maximum_array_error": 3.9968028886505635e-15,
-   "maximum_vertex_error": 2.115061598084722e-15,
-   "exact_index_and_label_checks": true
-  },
-  {
-   "case": "head",
-   "passed": true,
-   "maximum_array_error": 1.1189937865196953e-12,
-   "maximum_vertex_error": 1.942890293094024e-15,
-   "exact_index_and_label_checks": true
-  },
-  {
-   "case": "local_bone",
-   "passed": true,
-   "maximum_array_error": 1.58089063157745e-09,
-   "maximum_vertex_error": 2.9452057459522507e-10,
-   "exact_index_and_label_checks": true
-  },
-  {
-   "case": "local_bone_world",
-   "passed": true,
-   "maximum_array_error": 1.58089063157745e-09,
-   "maximum_vertex_error": 2.9452057459522507e-10,
-   "exact_index_and_label_checks": true
-  },
-  {
-   "case": "makehuman",
-   "passed": true,
-   "maximum_array_error": 7.053356606556704e-07,
-   "maximum_vertex_error": 6.819054750861753e-07,
-   "exact_index_and_label_checks": true
-  },
-  {
-   "case": "mixamo",
-   "passed": true,
-   "maximum_array_error": 9.136938947662543e-07,
-   "maximum_vertex_error": 1.1787916176508872e-07,
-   "exact_index_and_label_checks": true
-  },
-  {
-   "case": "notoes",
-   "passed": true,
-   "maximum_array_error": 1.58089063157745e-09,
-   "maximum_vertex_error": 2.9137144780255753e-10,
-   "exact_index_and_label_checks": true
-  },
-  {
-   "case": "procrustes",
-   "passed": true,
-   "maximum_array_error": 9.698107195088568e-08,
-   "maximum_vertex_error": 7.549516567451064e-15,
-   "exact_index_and_label_checks": true
-  },
-  {
-   "case": "pruned",
-   "passed": true,
-   "maximum_array_error": 1.58089063157745e-09,
-   "maximum_vertex_error": 2.935606566861759e-10,
-   "exact_index_and_label_checks": true
-  },
-  {
-   "case": "quads",
-   "passed": true,
-   "maximum_array_error": 1.58089063157745e-09,
-   "maximum_vertex_error": 2.91371449537281e-10,
-   "exact_index_and_label_checks": true
-  },
-  {
-   "case": "soma",
-   "passed": true,
-   "maximum_array_error": 3.683164884193957e-14,
-   "maximum_vertex_error": 2.55351295663786e-15,
-   "exact_index_and_label_checks": true
-  },
-  {
-   "case": "soma_anny",
-   "passed": true,
-   "maximum_array_error": 3.683164884193957e-14,
-   "maximum_vertex_error": 2.55351295663786e-15,
-   "exact_index_and_label_checks": true
-  },
-  {
-   "case": "soma_topology",
-   "passed": true,
-   "maximum_array_error": 1.58089063157745e-09,
-   "maximum_vertex_error": 2.912801111421004e-10,
-   "exact_index_and_label_checks": true
-  },
-  {
-   "case": "world",
-   "passed": true,
-   "maximum_array_error": 1.58089063157745e-09,
-   "maximum_vertex_error": 3.1559800519470604e-10,
-   "exact_index_and_label_checks": true
-  },
-  {
-   "case": "world_orient",
-   "passed": true,
-   "maximum_array_error": 1.58089063157745e-09,
-   "maximum_vertex_error": 3.14808082380047e-10,
-   "exact_index_and_label_checks": true
+  "unity_players_tested": true,
+  "unity_players": {
+    "script": "integrations/unity/tools/build-players.sh",
+    "editor": "6000.6.0f1",
+    "mono": {
+      "result": "Succeeded",
+      "bytes": 97037827,
+      "ran": true,
+      "vertices": 13718,
+      "mesh_vertices": 82260,
+      "triangles": 27420,
+      "bones": 104,
+      "influences": 9,
+      "signed_volume": 0.05101393,
+      "backend": "mono"
+    },
+    "il2cpp": {
+      "result": "Succeeded",
+      "bytes": 284477938,
+      "ran": true,
+      "vertices": 13718,
+      "mesh_vertices": 82260,
+      "triangles": 27420,
+      "bones": 104,
+      "influences": 9,
+      "signed_volume": 0.05101392,
+      "backend": "il2cpp"
+    },
+    "note": "Both players build from the same scene and generate the same character through the native plugin. Geometry, topology, influence width and signed volume are identical across backends; the signed volume differs only in the last float digit."
   }
- ],
- "native_tests": 111,
- "reference_environment": {
-  "python": "3.13.5",
-  "torch": "2.10.0+cpu",
-  "roma": "1.6.1",
-  "warp": "1.9.1",
-  "rust": "1.90.0"
- },
- "cache_reload_passed": true,
- "payload_reproducible": "the same build writes byte-identical prepared payloads (f64 and f32) in every process; the safetensors header is re-emitted with its keys sorted because the crate serializes __metadata__ straight out of a HashMap",
- "c_abi_smoke": "ABI 1: 13718 vertices, 27420 faces; pose sessions match evaluate exactly (f64+f32) and survive anny_model_free",
- "wasm_compilation_passed": true,
- "wasm_node_execution_passed": "pose sessions (f64 and f32) match evaluate exactly and survive their model being freed",
- "browser_execution_tested": true,
- "browser_execution": "Chromium 145.0.7632.6 through examples/qualification/browser.cjs (developer-only, not run by CI): full smoke passed with no page errors, including the f64 and f32 pose sessions matching evaluate exactly and surviving their model being freed",
- "browser_editor_tested": true,
- "browser_editor_execution": "Chromium 145.0.7632.6 through examples/qualification/editor-smoke.cjs (developer-only, not run by CI): 14/14 checks passed with no page errors and a clean console - panels built from describe(), a panel slider that moves the mesh, the same parameter through the editor's own entry point, posing through the pose session, an exact return to rest, GLB export accepted by the official glTF validator (0 errors, skins present), state save/load round trip, seeded randomisation, a texture applied to the material, clip playback, and 27,420 triangles drawn",
- "real_smpl_assets_tested": false,
- "unity_tested": true,
- "unity_editor": "6000.6.0f1",
- "unity_editmode": {
-  "total": 21,
-  "passed": 21,
-  "failed": 0,
-  "compiler": "Roslyn via the Unity editor",
-  "note": "real geometry from output/ci-model.safetensors; includes the bake-to-assets workflow"
- },
- "unity_playmode": {
-  "total": 5,
-  "passed": 5,
-  "failed": 0,
-  "session_update_ms": 0.4434,
-  "full_evaluation_ms": 0.7896,
-  "moved_vertices": 27436,
-  "largest_movement_m": 0.229793
- },
- "unity_exactness": {
-  "mesh_vs_native_array_m": 0.0,
-  "single_precision_vs_wide_m": 5e-07,
-  "skinning_identity_at_bind_pose_m": 3.3e-07,
-  "unity_bake_vs_native_vertices_m": 6.24606e-07,
-  "quality_level": "Ultra",
-  "skin_weights": "Unlimited",
-  "influences_per_vertex": 9
- }
 }
