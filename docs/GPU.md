@@ -80,6 +80,10 @@ not a deployment target.
   persistent output/staging buffers with an already-mapped readback target; that is
   not implemented here.
 
+`ANNY_REQUIRE_GPU=1` turns a missing model or adapter into a test **failure** instead of a skip, so a run
+that never touched the GPU cannot be counted as a pass. Used for the validation runs above; without it the
+tests skip with an explicit `SKIP:` line.
+
 ## Not done (with reasons)
 
 - **Browser WebGPU.** The workspace pins `js-sys =0.3.77` / `wasm-bindgen =0.2.100` for

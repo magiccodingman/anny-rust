@@ -41,22 +41,36 @@ fn coefficients(batch: usize, c: usize) -> TensorF32 {
     TensorF32::new(vec![batch, c], data).expect("coefficient shape")
 }
 
+/// A skip is only allowed when an operator has opted into it. With
+/// `ANNY_REQUIRE_GPU=1` set, a missing model or adapter fails the test instead,
+/// so a run that never touched the GPU cannot be mistaken for a passing one.
+fn skip(reason: &str) {
+    if std::env::var("ANNY_REQUIRE_GPU")
+        .map(|v| !v.is_empty() && v != "0")
+        .unwrap_or(false)
+    {
+        panic!("ANNY_REQUIRE_GPU=1 but {reason}");
+    }
+    println!("SKIP: {reason}");
+}
+
 /// Loads the CI model and an adapter, or explains why the test is skipped.
 fn fixture() -> Option<(Gpu, ModelData, TensorF32, TensorF32, usize)> {
     let path = match model_path() {
         Some(p) => p,
         None => {
-            println!("SKIP: no model (set ANNY_MODEL or create output/ci-model.safetensors)");
+            skip("no model (set ANNY_MODEL or create output/ci-model.safetensors)");
             return None;
         }
     };
     let gpu = match Gpu::open_matching(None) {
         Ok(g) => g,
         Err(e) => {
-            println!("SKIP: no usable GPU adapter: {e}");
+            skip(&format!("no usable GPU adapter: {e}"));
             return None;
         }
     };
+    println!("adapter: {}", gpu.adapter_name);
     let data = ModelData::load(&path).expect("model loads");
     let c = data.blendshape_count();
     let template = TensorF32::from_reference(data.get("template_vertices").unwrap()).unwrap();
