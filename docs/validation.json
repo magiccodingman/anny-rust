@@ -187,11 +187,11 @@
   "unity_tested": true,
   "unity_editor": "6000.6.0f1",
   "unity_editmode": {
-    "total": 21,
-    "passed": 21,
+    "total": 26,
+    "passed": 26,
     "failed": 0,
-    "compiler": "Roslyn via the Unity editor",
-    "note": "real geometry from output/ci-model.safetensors; includes the bake-to-assets workflow"
+    "compiler": "Unity 6000.6.0f1 Roslyn, zero errors",
+    "note": "Includes the preset round-trip (applying a captured preset reproduces the geometry to zero), preset asset serialization, edit-mode generation, inspector registration and bake-window option mapping."
   },
   "unity_playmode": {
     "total": 5,

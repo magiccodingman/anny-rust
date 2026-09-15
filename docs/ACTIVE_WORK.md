@@ -68,9 +68,12 @@ character through the native plugin — 13,718 source vertices, 82,260 mesh vert
 does not run proves nothing, which is why the smoke behaviour asserts the generated character and sets
 the process exit code from that result.
 
+Editor controls are done: `AnnyCharacterEditor` drives generation from edit mode with the phenotype
+sliders and the mesh report, `AnnyPreset` captures and applies a configuration as an ordinary asset,
+and `AnnyBakeWindow` exposes the baker. EditMode is 26/26 with those covered.
+
 Still open, in dependency order:
 
-1. Editor controls: custom inspector, presets, bake window UI (the baker itself is done and tested).
-2. Physics integration (`MeshCollider` from generated geometry) and animation/avatar retargeting.
-3. WebGL player build, which needs the wasm bindings rather than the cdylib the other two use.
-4. GPU/WebGPU and the remaining CPU work.
+1. Physics integration (`MeshCollider` from generated geometry) and animation/avatar retargeting.
+2. WebGL player build, which needs the wasm bindings rather than the cdylib the other two use.
+3. GPU/WebGPU and the remaining CPU work.
