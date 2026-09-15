@@ -53,8 +53,16 @@ namespace Anny
     /// </summary>
     public static class AnnyNative
     {
-        /// <summary>Native library basename. Ships as libanny.so / anny.dll / libanny.dylib.</summary>
+        /// <summary>
+        /// Native library basename. Ships as libanny.so / anny.dll / libanny.dylib. On WebGL the
+        /// functions are linked into the player from <c>Plugins/WebGL/libanny.a</c>, so they resolve
+        /// through Emscripten's <c>__Internal</c> module instead of by loading a library.
+        /// </summary>
+#if UNITY_WEBGL && !UNITY_EDITOR
+        public const string Library = "__Internal";
+#else
         public const string Library = "anny";
+#endif
 
         public const int StatusOk = 0;
         public const int StatusError = 1;

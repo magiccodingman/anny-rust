@@ -57,6 +57,45 @@ public static class PlayerBuild
         }
     }
 
+    [MenuItem("Anny/Build/WebGL player")]
+    public static void WebGL() { BuildWebGL(); }
+
+    public static void WebGLBatch() { BuildWebGL(); }
+
+    /// <summary>
+    /// Builds the WebGL player. Unlike the Linux players this does not load a shared library at all:
+    /// <c>Plugins/WebGL/libanny.a</c> is linked into the Emscripten main module, and the C ABI resolves
+    /// through <c>__Internal</c>. It is also the slowest build by far, so it is separate.
+    /// </summary>
+    public static void BuildWebGL()
+    {
+        CreateScene();
+
+        string root = Directory.GetParent(Application.dataPath).Parent.FullName;   // integrations/unity
+        string outDir = Path.Combine(root, "player-webgl");
+        Directory.CreateDirectory(outDir);
+
+        BuildPlayerOptions options = new BuildPlayerOptions
+        {
+            scenes = new[] { ScenePath },
+            locationPathName = outDir,
+            target = BuildTarget.WebGL,
+            targetGroup = BuildTargetGroup.WebGL,
+            options = BuildOptions.None,
+        };
+
+        BuildReport report = BuildPipeline.BuildPlayer(options);
+        BuildSummary summary = report.summary;
+        Debug.Log(string.Format(
+            "ANNY-PLAYER-BUILD webgl result={0} errors={1} bytes={2} path={3}",
+            summary.result, summary.totalErrors, summary.totalSize, options.locationPathName));
+
+        if (summary.result != BuildResult.Succeeded)
+        {
+            EditorApplication.Exit(1);
+        }
+    }
+
     private static void CreateScene()
     {
         UnityEngine.SceneManagement.Scene scene =
