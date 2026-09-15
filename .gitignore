@@ -14,4 +14,4 @@ examples/csharp/obj/
 examples/qualification/node_modules/
 # build-native.sh writes this sidecar next to the plugin it stages. The digest that matters is
 # recorded in the validation docs, so the file itself stays a local build artifact.
-integrations/unity/package/Plugins/x86_64/libanny.so.sha256
+integrations/unity/package/Plugins/x86_64/libanny.so.sha256*
