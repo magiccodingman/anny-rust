@@ -1,0 +1,51 @@
+name: Temporary Unity skinned-shape repair
+on:
+  push:
+    branches: [codex/native-v1-completion]
+permissions:
+  contents: write
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/native-v1-completion
+          fetch-depth: 0
+      - name: Apply reviewed Unity skinned-shape correction
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          def replace(path, old, new, count=1):
+              p=Path(path); text=p.read_text(); found=text.count(old)
+              if found != count:
+                  raise SystemExit(f"{path}: expected {count}, found {found}: {old[:100]!r}")
+              p.write_text(text.replace(old,new,count))
+
+          path="integrations/unity/package/Runtime/AnnyCharacter.cs"
+          replace(path,
+          '''            if (usePoseSession)\n            {\n                Session = Runtime.CreateSession(parameters);\n            }\n\n            PushOutput(output);''',
+          '''            if (usePoseSession)\n            {\n                Session = Runtime.CreateSession(parameters);\n            }\n\n            // Skinned mode stores phenotype-dependent bind geometry and bind poses in the Unity\n            // mesh. A full shape update therefore has to replace that representation; moving only\n            // the bones would leave the renderer skinning the previous body's rest surface.\n            if (mode == AnnyUpdateMode.Skinned)\n            {\n                RebuildSkinnedRepresentation(output);\n            }\n\n            PushOutput(output);''')
+          replace(path,
+          '''        /// Pose-only update through the native session. Falls back to a full evaluation when no\n        /// session exists, which is the case when sliders changed since <see cref="Generate"/>.''',
+          '''        /// Pose-only update through the native session. Falls back to a full evaluation when no\n        /// session exists; full phenotype/body/face updates rebuild the session for their new shape.''')
+
+          marker='''        private void InstallRenderer()\n        {'''
+          helper='''        private void RebuildSkinnedRepresentation(AnnyOutputF32 output)\n        {\n            if (Rig != null && Rig.Root != null)\n            {\n                GameObject oldRig = Rig.Root.gameObject;\n                if (Application.isPlaying)\n                {\n                    Destroy(oldRig);\n                }\n                else\n                {\n                    DestroyImmediate(oldRig);\n                }\n            }\n\n            if (GeneratedMesh != null)\n            {\n                if (Application.isPlaying)\n                {\n                    Destroy(GeneratedMesh);\n                }\n                else\n                {\n                    DestroyImmediate(GeneratedMesh);\n                }\n            }\n\n            meshOptions.UseBindPoseGeometry = true;\n            AnnyMeshResult built = AnnyMeshBuilder.Build(Runtime, output, meshOptions);\n            GeneratedMesh = built.Mesh;\n            Report = built.Report;\n            CornerSource = built.CornerSource;\n            GeneratedMesh.name = name + "-anny";\n            Rig = AnnySkeleton.Build(modelAsset.Description, output, transform);\n            InstallRenderer();\n            WarnIfQualityDropsInfluences();\n        }\n\n''' + marker
+          replace(path, marker, helper)
+
+          tests="integrations/unity/package/Tests/PlayMode/AnnyCharacterPlayTests.cs"
+          marker='''        [UnityTest]\n        public IEnumerator DisposingTheCharacterReleasesTheNativeModel()'''
+          addition='''        [UnityTest]\n        public IEnumerator SkinnedPhenotypeChangeRebuildsBindGeometry()\n        {\n            AnnyCharacter run = Spawn(AnnyUpdateMode.Skinned);\n            yield return null;\n\n            Mesh previousMesh = run.GeneratedMesh;\n            Transform previousRig = run.Rig.Root;\n            Vector3[] before = previousMesh.vertices;\n\n            run.SetPhenotype("gender", 1f);\n            run.Apply();\n            yield return null;\n\n            Assert.AreNotSame(previousMesh, run.GeneratedMesh, "a new shape needs new bind geometry");\n            Assert.IsTrue(previousRig == null, "the old phenotype rig must be destroyed");\n            Vector3[] after = run.GeneratedMesh.vertices;\n            Assert.AreEqual(before.Length, after.Length, "mesh vertex count");\n            int moved = 0;\n            for (int i = 0; i < after.Length; i++)\n            {\n                if (after[i] != before[i])\n                {\n                    moved++;\n                }\n            }\n            Assert.Greater(moved, 0, "a phenotype update must change the skinned bind surface");\n\n            Mesh baked = new Mesh();\n            try\n            {\n                run.Skinned.BakeMesh(baked);\n                Vector3[] bakedVertices = baked.vertices;\n                float[] native = run.LastVertices();\n                float worst = 0f;\n                for (int v = 0; v < bakedVertices.Length; v++)\n                {\n                    int source = run.CornerSource != null ? run.CornerSource[v] : v;\n                    Vector3 expected = AnnyRepresentation.ToUnityPosition(\n                        native[source * 3], native[source * 3 + 1], native[source * 3 + 2]);\n                    worst = Mathf.Max(worst, (bakedVertices[v] - expected).magnitude);\n                }\n                Assert.Less(worst, 1e-3f, "re-shaped skinned bake must still match native evaluation");\n            }\n            finally\n            {\n                Object.DestroyImmediate(baked);\n            }\n        }\n\n''' + marker
+          replace(tests, marker, addition)
+          PY
+      - name: Commit correction and remove temporary runner
+        shell: bash
+        run: |
+          git rm .github/workflows/reviewer-unity-shape-repair.yml
+          git add -A
+          git config user.name "OpenAI review repair"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Rebuild Unity skinned state after shape changes"
+          git push origin HEAD:codex/native-v1-completion
