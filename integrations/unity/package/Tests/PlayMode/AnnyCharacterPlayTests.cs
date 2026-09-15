@@ -312,6 +312,56 @@ namespace Anny.Tests
         }
 
         [UnityTest]
+        public IEnumerator SkinnedPhenotypeChangeRebuildsBindGeometry()
+        {
+            AnnyCharacter run = Spawn(AnnyUpdateMode.Skinned);
+            yield return null;
+
+            Mesh previousMesh = run.GeneratedMesh;
+            Transform previousRig = run.Rig.Root;
+            Vector3[] before = previousMesh.vertices;
+
+            run.SetPhenotype("gender", 1f);
+            run.Apply();
+            yield return null;
+
+            Assert.AreNotSame(previousMesh, run.GeneratedMesh, "a new shape needs new bind geometry");
+            Assert.IsTrue(previousRig == null, "the old phenotype rig must be destroyed");
+            Vector3[] after = run.GeneratedMesh.vertices;
+            Assert.AreEqual(before.Length, after.Length, "mesh vertex count");
+            int moved = 0;
+            for (int i = 0; i < after.Length; i++)
+            {
+                if (after[i] != before[i])
+                {
+                    moved++;
+                }
+            }
+            Assert.Greater(moved, 0, "a phenotype update must change the skinned bind surface");
+
+            Mesh baked = new Mesh();
+            try
+            {
+                run.Skinned.BakeMesh(baked);
+                Vector3[] bakedVertices = baked.vertices;
+                float[] native = run.LastVertices();
+                float worst = 0f;
+                for (int v = 0; v < bakedVertices.Length; v++)
+                {
+                    int source = run.CornerSource != null ? run.CornerSource[v] : v;
+                    Vector3 expected = AnnyRepresentation.ToUnityPosition(
+                        native[source * 3], native[source * 3 + 1], native[source * 3 + 2]);
+                    worst = Mathf.Max(worst, (bakedVertices[v] - expected).magnitude);
+                }
+                Assert.Less(worst, 1e-3f, "re-shaped skinned bake must still match native evaluation");
+            }
+            finally
+            {
+                Object.DestroyImmediate(baked);
+            }
+        }
+
+        [UnityTest]
         public IEnumerator DisposingTheCharacterReleasesTheNativeModel()
         {
             AnnyCharacter run = Spawn(AnnyUpdateMode.Exact);

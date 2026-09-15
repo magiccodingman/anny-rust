@@ -337,12 +337,20 @@ namespace Anny
                 Session = Runtime.CreateSession(parameters);
             }
 
+            // Skinned mode stores phenotype-dependent bind geometry and bind poses in the Unity
+            // mesh. A full shape update therefore has to replace that representation; moving only
+            // the bones would leave the renderer skinning the previous body's rest surface.
+            if (mode == AnnyUpdateMode.Skinned)
+            {
+                RebuildSkinnedRepresentation(output);
+            }
+
             PushOutput(output);
         }
 
         /// <summary>
         /// Pose-only update through the native session. Falls back to a full evaluation when no
-        /// session exists, which is the case when sliders changed since <see cref="Generate"/>.
+        /// session exists; full phenotype/body/face updates rebuild the session for their new shape.
         /// </summary>
         public void ApplyPose(string poseJson)
         {
@@ -429,6 +437,44 @@ namespace Anny
                     "evaluation; set QualitySettings.skinWeights to Unlimited, or use " +
                     "AnnyUpdateMode.Exact.", this);
             }
+        }
+
+        private void RebuildSkinnedRepresentation(AnnyOutputF32 output)
+        {
+            if (Rig != null && Rig.Root != null)
+            {
+                GameObject oldRig = Rig.Root.gameObject;
+                if (Application.isPlaying)
+                {
+                    Destroy(oldRig);
+                }
+                else
+                {
+                    DestroyImmediate(oldRig);
+                }
+            }
+
+            if (GeneratedMesh != null)
+            {
+                if (Application.isPlaying)
+                {
+                    Destroy(GeneratedMesh);
+                }
+                else
+                {
+                    DestroyImmediate(GeneratedMesh);
+                }
+            }
+
+            meshOptions.UseBindPoseGeometry = true;
+            AnnyMeshResult built = AnnyMeshBuilder.Build(Runtime, output, meshOptions);
+            GeneratedMesh = built.Mesh;
+            Report = built.Report;
+            CornerSource = built.CornerSource;
+            GeneratedMesh.name = name + "-anny";
+            Rig = AnnySkeleton.Build(modelAsset.Description, output, transform);
+            InstallRenderer();
+            WarnIfQualityDropsInfluences();
         }
 
         private void InstallRenderer()
