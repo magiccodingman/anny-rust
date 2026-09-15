@@ -42,9 +42,11 @@ See:
 The following remain the major successor workstream:
 
 1. GPU/WebGPU backend — first kernel done: `crates/anny-gpu` runs the blendshape
-   contraction (the dominant cost of `rest_model`/`pose_model`) on wgpu/Vulkan, with
-   parity tests and a measured crossover in `docs/GPU.md`. Remaining: a browser
-   (WebGPU) target, and wiring the kernel into a batch evaluation path.
+   contraction on wgpu/Vulkan, with parity tests and a sparsity-aware crossover in
+   `docs/GPU.md`. Remaining: a browser (WebGPU) target. Wiring is *not* remaining: the
+   measured ceiling (1.5-1.8x of `rest_model` even if the stage were free, and a loss
+   for sparse poses below batch ~16) is why the kernel stays behind the measured
+   numbers instead of in the default path.
 2. SIMD tuning.
 3. Unity Runtime/Editor package.
 4. Complete browser character editor.
@@ -93,18 +95,24 @@ Still open, in dependency order:
    `invoke_*` unwind trampolines (428 references). `docs/UNITY_WEBGL.md` records the shim, the archive
    digest and the three unblock options; no player is claimed.
 2. Humanoid/avatar mapping (`AvatarBuilder`) on top of the baked-clip work.
-3. GPU/WebGPU: first kernel shipped and measured (`docs/GPU.md`); the browser (WebGPU) target and a
-   batch integration path remain. The remaining CPU work is unchanged.
+3. GPU/WebGPU: first kernel shipped, measured and correctly left unwired (`docs/GPU.md`); the browser
+   (WebGPU) target remains. The remaining CPU work is unchanged.
 
 ### GPU: one kernel shipped, batch-only, and measured
 
-`crates/anny-gpu` runs the blendshape contraction — the dominant cost of `rest_model`/`pose_model` — on
+`crates/anny-gpu` runs the blendshape contraction — the largest single stage of `rest_model`/`pose_model` — on
 wgpu/Vulkan, verified against the shipped f32 evaluator: 4.2e-7..1.9e-6 max absolute difference on an
 RTX 3090 (FMA contraction in the shader) and bit-exact on llvmpipe, both inside the 1e-5 the parity tests
 assert and below the 8.3e-7 the project already accepts between its own f32 and f64 paths.
 
-Timing on the RTX 3090: single-pose evaluation is *slower* on the GPU (0.57x even with resident weights —
-per-call buffer creation and a synchronous readback cost ~10 ms against ~6 ms of CPU work), so the
-interactive path stays on the CPU. Batching is the win: 2.6x at 4, 7.1x at 16, 16.2x at 64, 17.8x at 256.
-There is no browser WebGPU target yet: the workspace pins `js-sys`/`wasm-bindgen` for the browser-validated
-`anny-wasm` build and wgpu's web backend requires a newer `js-sys`.
+Timing on the RTX 3090, with both kernels skipping zero coefficients: the crossover depends on **realized
+sparsity**, not batch size alone. Real coefficients are sparse (the default character switches on 32 of 624,
+5.13%), and there the GPU is 0.04x at batch 1, crosses over near batch 16 and caps at 1.92x at 256 — while a
+workload that switches all 624 on reaches 5.50x at 16 and 17.13x at 256. Because the stage is only 0.14-0.19 ms
+of a 0.437 ms `rest_model`, even a free GPU stage could not exceed ~1.5-1.8x end-to-end.
+
+That is the reason the kernel stays unwired: it is a batch accelerator for dense coefficient workloads and a
+loss for typical sparse poses, and accelerating it alone cannot pay. The measured ceiling says any larger win
+has to come from a different stage (orientations/Procrustes/normals in `rest_model`, or the pose/skinning/export
+path), not from this contraction. There is no browser WebGPU target yet: the workspace pins `js-sys`/`wasm-bindgen`
+for the browser-validated `anny-wasm` build and wgpu's web backend requires a newer `js-sys`.

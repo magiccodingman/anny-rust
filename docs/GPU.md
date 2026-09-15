@@ -26,19 +26,37 @@ measurement runs against a second implementation.
 ## Measured: NVIDIA GeForce RTX 3090, Vulkan
 
 `cpu` is the shipped f32 evaluator, `gpu` the whole call (buffer creation, upload,
-dispatch, readback, synchronous wait). One-shot mode re-uploads the weights every
-call; resident mode uploads them once and sends only the coefficients.
+dispatch, readback, synchronous wait). The GPU figures are the resident-weights path
+(weights uploaded once, only coefficients travel per call); the one-shot path re-uploads
+the 102.7 MB blendshape tensor every call and is slower still.
 
-| batch | one-shot cpu ms | one-shot gpu ms | speedup | resident gpu ms | speedup |
-|------:|----------------:|----------------:|--------:|----------------:|--------:|
-|     1 |           5.88 |           24.58 |   0.24x |           11.29 |   0.57x |
-|     4 |          24.00 |           24.85 |   0.97x |           11.48 |   2.57x |
-|    16 |         103.10 |           26.95 |   3.83x |           13.95 |   7.14x |
-|    64 |         405.88 |           39.77 |  10.21x |           25.19 |  16.21x |
-|   256 |        1676.15 |          104.98 |  15.97x |           94.70 |  17.78x |
+**The crossover depends on how many coefficients a workload switches on.** Both kernels
+skip zero coefficients (`w == 0.0`), so a sparse set touches only its active rows on
+either side — and real sets are sparse: the default character switches on **32 of 624
+coefficients (5.13%)**. Both ends measured through the same code path
+(`examples/real_batch.rs`, RTX 3090):
 
-Decision (see "What this means" below): the GPU path is a **batch accelerator**, not a
-latency win. It is not wired into the evaluator's default path.
+| coefficients | batch 1 | batch 16 | batch 64 | batch 256 |
+|---|---:|---:|---:|---:|
+| sparse 5.13%: cpu / gpu ms | 0.189 / 4.65 | 6.31 / 5.11 | 28.66 / 18.57 | 107.15 / 55.73 |
+| sparse speedup | **0.04x** | 1.23x | 1.54x | **1.92x** |
+| dense (all 624 on): cpu / gpu ms | 6.67 / 10.19 | 115.94 / 21.09 | 509.59 / 41.84 | 1804.03 / 105.34 |
+| dense speedup | **0.65x** | 5.50x | 12.18x | **17.13x** |
+
+Parity at the real 5.13% sparsity is max abs 1.8e-7 .. 2.4e-7, so the skip is numerically
+neutral. An earlier revision of this table was measured with dense synthetic coefficients
+only and reported up to 17.8x as if it were the general case; it is the dense end, and the
+sparse end is what typical poses hit.
+
+At real sparsity the stage costs **0.14-0.19 ms of a 0.437 ms `rest_model`** (two runs of
+the two examples; run-to-run spread is ~30%), so even an infinitely fast stage would speed
+up the rest model by only **1.5-1.8x**, and less end-to-end — load, pose, skinning and
+export are untouched.
+
+Decision: the GPU path is a **batch accelerator for dense coefficient workloads** (for
+example random phenotype sampling that switches most blendshapes on) and a **loss for
+typical sparse poses below batch ~16**. Realized sparsity, not batch size alone, decides
+it, so it is not wired into the evaluator's default path.
 
 ## Parity
 
@@ -72,10 +90,16 @@ not a deployment target.
 ## What this means
 
 - **Do not** route single-pose / interactive evaluation to the GPU: at B=1 it is
-  0.5x-0.6x even with resident weights, because per-call buffer creation plus a
-  synchronous readback costs ~10 ms while the whole contraction is ~6 ms of CPU.
-- **Do** use it for batching (dataset generation, phenotype sweeps): 7.1x at B=16,
-  16.2x at B=64, 17.8x at B=256.
+  0.04x (sparse) to 0.65x (dense) even with resident weights, because per-call buffer
+  creation plus a synchronous readback costs ~4-10 ms while the whole contraction is
+  0.19-6.7 ms of CPU.
+- **Batch only, and only when the workload is dense-ish**: the CPU kernel skips zero
+  coefficients, so a sparse pose (the common case) makes the GPU read 624 rows where
+  the CPU reads 32. Sparse wins above batch ~16 and caps at 1.9x; a workload that
+  switches most blendshapes on reaches 5.5x at B=16 and 17.1x at B=256.
+- Even in the best case this stage is 0.14-0.19 ms of a 0.437 ms `rest_model`, so the
+  end-to-end ceiling for accelerating it alone is ~1.5-1.8x. Anything larger requires
+  moving a *different* stage (pose, skinning, export) or the whole evaluation.
 - The remaining gap at B=1 is engine overhead, not arithmetic. Reducing it means
   persistent output/staging buffers with an already-mapped readback target; that is
   not implemented here.
@@ -92,9 +116,16 @@ tests skip with an explicit `SKIP:` line.
   browser editor end to end. Until then `anny-gpu` is built `--no-default-features`
   with `vulkan,wgsl` and has no wasm target. The kernel is WebGPU-shaped (WGSL,
   bind groups, dispatch) so the port is an interface change, not a rewrite.
-- **Integration into `anny-cli` / the C API.** Nothing calls the GPU kernel yet; the
-  measurements above are the evidence needed to decide where it goes (batch paths
-  only). Real-phenotype coefficients also need the `stacked_phenotype_blend_shapes_mask`
-  path, which requires a validated phenotype vector.
+- **Integration into `anny-cli` / the C API.** Nothing calls the GPU kernel yet, and on
+  this evidence it should stay that way for the blendshape stage: it is a loss below
+  batch ~16 for sparse coefficients and its ceiling even when free is 1.5-1.8x of
+  `rest_model`. The measurements above are what that decision rests on. Real-phenotype
+  coefficients also need the `stacked_phenotype_blend_shapes_mask` path, which requires
+  a validated phenotype vector.
+- **A GPU stage that would move the needle.** Profiling says the rest of `rest_model`
+  (orientations, Procrustes, normals) is the other ~0.25-0.3 ms and the pose/skinning/
+  export stages are untouched entirely; those, not this contraction, are where a
+  meaningful end-to-end win would have to come from.
 - **Other kernels.** `bone_transforms`, the Procrustes/orientation pass and the
-  skinning bake are untouched; only the contraction (the dominant cost) is on the GPU.
+  skinning bake are untouched; only the contraction (the largest single stage of
+  `rest_model`) is on the GPU.

@@ -2,9 +2,11 @@
 //!
 //! Mirrors `apply_blendshapes` in `anny-core/src/kernels/evaluation.rs`:
 //! `out[b][i] = template[i] + sum_k coeff[b][k] * blendshapes[k][i]`.
-//! The CPU skips zero coefficients; the shader adds them, which is exactly
-//! equivalent for finite inputs (`x + 0.0 == x`), so the parity check includes
-//! zero coefficients on purpose.
+//! The CPU skips zero coefficients; the shader skips them too, so both touch
+//! only the active rows. Real coefficient sets are sparse — the default
+//! character's 624 coefficients have 32 nonzero (5.13%) — and the parity check
+//! still includes zero coefficients on purpose, since skipping must not change
+//! the result.
 
 use crate::{Gpu, GpuError};
 
@@ -29,6 +31,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     var acc: f32 = template_values[gid.x];
     for (var k: u32 = 0u; k < params.blendshapes; k = k + 1u) {
         let w = coefficients[gid.y * params.blendshapes + k];
+        if (w == 0.0) {
+            continue;
+        }
         acc = acc + w * blendshape_values[k * params.size + gid.x];
     }
     result[gid.y * params.size + gid.x] = acc;
