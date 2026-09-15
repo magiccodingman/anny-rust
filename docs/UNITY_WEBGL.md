@@ -91,3 +91,10 @@ project cannot configure.
 The staged archive is the stable-1.90 build at `sha256 015697c8fa910572...`; the digests of
 `target/wasm32-unknown-emscripten/release/libanny_capi.a` and the staged `Plugins/WebGL/libanny.a`
 are identical, so the measurements above describe the artifact on disk.
+
+## Status of the plugin artifacts
+
+The local copies under `integrations/unity/package/Plugins/WebGL/` and the directory itself were
+deleted on 2026-09-15 with the owner's explicit approval. `tools/build-native-webgl.sh` regenerates
+both the archive and the shim whenever the blocker above is solved; nothing was ever committed, so
+no shipped artifact depends on them.
