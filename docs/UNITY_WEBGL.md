@@ -64,3 +64,24 @@ staticlib rather than a plain `cargo build`.
 The browser surface of this project is not blocked: `examples/editor/` is a WebAssembly editor built
 with `wasm-bindgen` and it passes 14 checks in a real Chromium
 (`examples/qualification/editor-smoke.cjs`).
+
+## Second attempt: shims
+
+`tools/build-native-webgl.sh` builds the archive and *generates* `anny-eh-shim.jslib` from the
+archive's own undefined symbols, so the shim list is derived rather than hand-maintained. It resolves
+eight symbols (`__cxa_allocate_exception`, `__cxa_begin_catch`, `__cxa_end_catch`,
+`__cxa_find_matching_catch_2`, `__cxa_find_matching_catch_4`, `__cxa_throw`, `llvm_eh_typeid_for`,
+`__resumeException`) as aborts.
+
+Result: the link goes from **6 undefined symbols to 1** — and that last one is structural, not a
+missing definition:
+
+```
+AssertionError: invoke_ functions exported but exceptions and longjmp are both disabled
+```
+
+The archive imports 47 `invoke_*` trampolines (Rust's unwind landing pads). Declaring them in the
+`.jslib` does not help: Emscripten then counts them as invoke functions and asserts on the same line.
+They cannot be removed from the archive either, because Rust's std for this target is unwind-only.
+The remaining failure is therefore in Emscripten's JS-glue stage of *Unity's* build, which this
+project cannot configure.
