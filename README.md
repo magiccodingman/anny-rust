@@ -15,6 +15,7 @@ Native v1 covers body generation, true f64/f32 evaluation, authoring transforms,
 | `anny-cli` | Preparation, generation, conversion, fitting, motion/AMASS and authoring commands |
 | `anny-capi` | Stable native C ABI with typed f64/f32 and serialized secondary operations |
 | `anny-wasm` | Browser/WASM wrapper with owned typed-array results and shared query/authoring operations |
+| `anny-gpu` | wgpu/WebGPU blendshape compute kernel, native/browser parity gates and resident-weight batching |
 
 Rust 1.90+ is required.
 
@@ -185,11 +186,11 @@ LD_LIBRARY_PATH="$PWD/target/release${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
 
 `AnnyPoseSession` and `AnnySinglePrecisionPoseSession` are the managed session wrappers. They hold the managed model, so neither the managed nor the native model can be released while a session is alive, and the example asserts that the pose-only path agrees with `evaluate` exactly.
 
-This managed layer is **not yet the deferred full Unity Runtime/Editor package**.
+A full Unity 6000 Runtime/Editor package now lives under `integrations/unity/`: native plugin packaging, managed ownership, Mesh/SkinnedMeshRenderer integration, humanoid mapping, editor controls, baking, and real Mono/IL2CPP player qualification. The shipped plugin is Linux x86_64; other platforms build the same C ABI for their target.
 
 ## WebAssembly
 
-The core loads prepared model bytes in-memory and returns owned JS typed arrays. `AnnyModel.poseSession()` (and `AnnyModelF32.poseSession()`) returns a reusable `AnnySession` whose `update()` re-poses without re-evaluating the rest of the model; like the other wrappers it returns owned copies and keeps the model alive itself. The current browser example reports geometry and session output rather than rendering.
+The core loads prepared model bytes in-memory and returns owned JS typed arrays. `AnnyModel.poseSession()` (and `AnnyModelF32.poseSession()`) returns a reusable `AnnySession` whose `update()` re-poses without re-evaluating the rest of the model; like the other wrappers it returns owned copies and keeps the model alive itself. `examples/editor/` is a real three.js character editor over these bindings with generated phenotype/body/face/pose controls, materials/textures, clip preview, presets/state, and GLB export.
 
 ```sh
 rustup target add wasm32-unknown-unknown
@@ -198,7 +199,7 @@ cargo check -p anny-wasm --target wasm32-unknown-unknown --locked
 
 An actual Chromium qualification has exercised the real model through WASM, including f64/f32 evaluation, measurements, JVP, an Adam refinement step, rigged GLB, texture/morph authoring and animation import/sampling. See [V1 validation](docs/V1_VALIDATION.md).
 
-That proves the portable browser runtime; it is **not** the still-deferred complete browser character-editor UI or WebGPU backend.
+The same WASM artifact also exposes the `anny-gpu` blendshape kernel through browser WebGPU. The browser editor and WebGPU path are both exercised in real Chrome; see `examples/editor/README.md`, `docs/GPU.md`, and `docs/VALIDATION.md`.
 
 ## Reference qualification
 
@@ -216,17 +217,17 @@ python tools/check_parity.py \
 
 Fresh pinned-source qualification passes **23/23** cases at `atol=1e-6`, `rtol=0`, with integer arrays/labels exact. This is strong regression evidence, not a mathematical proof over every possible continuous input.
 
-## What is intentionally still later work
+## Post-v1 product and performance status
 
-Native v1 establishes portable correctness and authoring. The next project phase is intentionally separate:
+The successor work that began after native-v1 is now delivered at the measured scope recorded in the repository:
 
-1. **GPU/WebGPU backend**.
-2. **SIMD tuning**.
-3. **Unity Runtime/Editor package**.
-4. **Complete browser character editor**.
-5. **Serious performance optimization** (profiling, reusable workspaces, allocation/layout tuning, incremental updates, batching/threading and load-time work).
+1. **GPU/WebGPU foundation** — `anny-gpu` ships a real wgpu/Vulkan + browser WebGPU blendshape kernel with resident weights and strict CPU-parity qualification. Profiling showed that automatically routing normal single-character evaluation through this kernel would be slower; broader FK/skinning/fitting offload remains optional future GPU expansion rather than a fake speed claim.
+2. **SIMD investigation** — measured and closed: baseline x86-64 remains portable, while opt-in `x86-64-v3`/native builds gain roughly 5-15%; hand-written SIMD was not justified by the measured ceiling.
+3. **Unity Runtime/Editor package** — delivered under `integrations/unity/`, including editor and player validation.
+4. **Browser character editor** — delivered under `examples/editor/` and driven in real Chrome.
+5. **Profiling-driven performance work** — fixed the dominant redundant validation/allocation costs, accelerated prepare/reload/collision, added pose sessions, and documented rejected/optional optimizations.
 
-See [Porting status](docs/PORTING_STATUS.md) for precise supported/deferred boundaries.
+See [Porting status](docs/PORTING_STATUS.md), [performance](docs/PERFORMANCE.md), [GPU](docs/GPU.md), and [validation](docs/VALIDATION.md) for measured boundaries.
 
 ## Licensing
 

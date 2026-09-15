@@ -9,10 +9,10 @@ namespace Anny
     /// </summary>
     public sealed class AnnyOutput : IDisposable
     {
-        /// <summary>Rest-pose vertex positions, shape <c>[B, vertices, 3]</c>.</summary>
+        /// <summary>Posed vertex positions, shape <c>[B, vertices, 3]</c>.</summary>
         public const string Vertices = "vertices";
 
-        /// <summary>Posed vertex positions, shape <c>[B, vertices, 3]</c>.</summary>
+        /// <summary>Rest-pose vertex positions, shape <c>[B, vertices, 3]</c>.</summary>
         public const string RestVertices = "rest_vertices";
 
         /// <summary>Bone matrices, shape <c>[B, bones, 4, 4]</c>, row-major.</summary>
@@ -59,7 +59,19 @@ namespace Anny
         /// <summary>The posed vertex positions of batch 0 as a flat <c>[vertices * 3]</c> array.</summary>
         public double[] VertexData(int batch = 0)
         {
-            return Tensor(Vertices).Data;
+            AnnyTensor vertices = Tensor(Vertices);
+            if (vertices.Rank != 3 || vertices.Shape[2] != 3)
+            {
+                throw new InvalidOperationException("vertices must have shape [batch, vertices, 3]");
+            }
+            if (batch < 0 || batch >= vertices.Shape[0])
+            {
+                throw new ArgumentOutOfRangeException(nameof(batch));
+            }
+            int stride = checked(vertices.Shape[1] * vertices.Shape[2]);
+            double[] result = new double[stride];
+            Array.Copy(vertices.Data, batch * stride, result, 0, stride);
+            return result;
         }
 
         public void Dispose()

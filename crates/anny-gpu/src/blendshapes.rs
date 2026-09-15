@@ -59,6 +59,7 @@ pub struct Weights {
     blendshapes_buf: wgpu::Buffer,
     size: usize,
     c: usize,
+    blendshape_len: usize,
 }
 
 fn as_bytes(v: &[f32]) -> &[u8] {
@@ -137,6 +138,7 @@ impl Weights {
             blendshapes_buf: mk("blendshapes (resident)", as_bytes(blendshapes)),
             size: template.len(),
             c,
+            blendshape_len: blendshapes.len(),
         }
     }
 
@@ -167,7 +169,34 @@ impl Weights {
         coefficients: &[f32],
         batch: usize,
     ) -> Result<Vec<f32>, GpuError> {
-        let out_len = batch * self.size;
+        if batch == 0 || self.c == 0 || self.size == 0 {
+            return Err(GpuError::InvalidInput(
+                "batch, coefficient count and output size must be nonzero".into(),
+            ));
+        }
+        let expected_coefficients = batch
+            .checked_mul(self.c)
+            .ok_or_else(|| GpuError::InvalidInput("coefficient shape overflow".into()))?;
+        if coefficients.len() != expected_coefficients {
+            return Err(GpuError::InvalidInput(format!(
+                "expected {expected_coefficients} coefficients for batch {batch} x {}, got {}",
+                self.c,
+                coefficients.len()
+            )));
+        }
+        let expected_blendshapes = self
+            .c
+            .checked_mul(self.size)
+            .ok_or_else(|| GpuError::InvalidInput("blendshape shape overflow".into()))?;
+        if self.blendshape_len != expected_blendshapes {
+            return Err(GpuError::InvalidInput(format!(
+                "resident blendshape buffer has {} values; expected {expected_blendshapes}",
+                self.blendshape_len
+            )));
+        }
+        let out_len = batch
+            .checked_mul(self.size)
+            .ok_or_else(|| GpuError::InvalidInput("output shape overflow".into()))?;
         let coeffs_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("coefficients"),
             size: (coefficients.len() * 4) as u64,
@@ -304,7 +333,32 @@ impl BlendshapeKernel {
         c: usize,
     ) -> Result<Vec<f32>, GpuError> {
         let size = template.len();
-        let out_len = batch * size;
+        if batch == 0 || c == 0 || size == 0 {
+            return Err(GpuError::InvalidInput(
+                "batch, coefficient count and template size must be nonzero".into(),
+            ));
+        }
+        let expected_blendshapes = c
+            .checked_mul(size)
+            .ok_or_else(|| GpuError::InvalidInput("blendshape shape overflow".into()))?;
+        if blendshapes.len() != expected_blendshapes {
+            return Err(GpuError::InvalidInput(format!(
+                "expected {expected_blendshapes} blendshape values for {c} x {size}, got {}",
+                blendshapes.len()
+            )));
+        }
+        let expected_coefficients = batch
+            .checked_mul(c)
+            .ok_or_else(|| GpuError::InvalidInput("coefficient shape overflow".into()))?;
+        if coefficients.len() != expected_coefficients {
+            return Err(GpuError::InvalidInput(format!(
+                "expected {expected_coefficients} coefficients for batch {batch} x {c}, got {}",
+                coefficients.len()
+            )));
+        }
+        let out_len = batch
+            .checked_mul(size)
+            .ok_or_else(|| GpuError::InvalidInput("output shape overflow".into()))?;
         let storage = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST;
         let mk = |label: &str, bytes: &[u8], usage| {
             let buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {

@@ -37,9 +37,9 @@ See:
 - Closest-surface/landmark fitting is not a claim of automatic globally robust registration for every arbitrary scan.
 - Geometry-only glTF import intentionally flattens document authoring; use retained `GltfAsset` operations when materials/morphs/animation must round-trip.
 
-## Next project phase — intentionally unfinished
+## Post-v1 product/performance phase — delivered at measured scope
 
-The following remain the major successor workstream:
+The original successor workstream has now been carried through as follows:
 
 1. GPU/WebGPU backend — done on both targets: `crates/anny-gpu` runs the blendshape
    contraction on wgpu/Vulkan natively and on the browser's WebGPU, with parity tests, a
@@ -61,11 +61,10 @@ The following remain the major successor workstream:
 4. Complete browser character editor — delivered: preview with phenotype/body/face/pose controls,
    material controls, clip playback, presets and randomize, and GLB export; 14/14 against real Chrome.
 5. Serious profiling-driven performance optimization — the ranked list in `docs/PERFORMANCE.md` is now
-   measured through and corrected: 2 closed (per-character accumulation at the hardware limit;
-   zero-copy loading decided-and-declined), 1 answered and its stale number fixed (`derive measure` is
-   1.238 ms min / 1.590 ms median, not 8.5 ms), 1 blocked on a deliberate parity decision (collision's
-   exact-AABB candidate set changes the answer, so it is not a pure optimization). One thing still needs
-   the owner rather than more work: that collision parity call. The browser (WebGPU) item listed here is
+   measured through and corrected: per-character accumulation is at the measured hardware floor;
+   zero-copy loading was deliberately declined; `derive measure` is 1.238 ms min / 1.590 ms median;
+   and collision keeps the existing parity-compatible candidate semantics. The faster exact-AABB
+   alternative was rejected because it changes the answer, so it is not a pure optimization. The browser (WebGPU) item listed here is
    now delivered, and it was never actually blocked: wgpu 26 — the version in use — requires exactly the
    `js-sys`/`wasm-bindgen` versions this workspace pins, so no bump was needed and the 14/14 editor result
    was re-qualified on the new artifact rather than invalidated.

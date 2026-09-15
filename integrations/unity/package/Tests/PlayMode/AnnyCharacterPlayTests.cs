@@ -263,6 +263,54 @@ namespace Anny.Tests
             }
         }
 
+        [Test]
+        public void PhenotypeChangeRebuildsSessionBeforeTheNextPose()
+        {
+            AnnyCharacter run = Spawn(AnnyUpdateMode.Exact);
+            run.SetPhenotype("gender", 0.75f);
+            run.Apply();
+
+            float[] shaped = (float[])run.LastVertices().Clone();
+            Assert.IsNotNull(run.Session, "full shape updates must leave a session for the new shape");
+
+            string bone = run.Rig.Labels[0];
+            string poseJson = AnnyRepresentation.NamedPosesToJson(
+                new System.Collections.Generic.Dictionary<string, Matrix4x4>
+                {
+                    { bone, Matrix4x4.Rotate(Quaternion.Euler(12f, 0f, 0f)) }
+                });
+            run.ApplyPose(poseJson);
+            run.ApplyRestPose();
+
+            CollectionAssert.AreEqual(
+                shaped,
+                run.LastVertices(),
+                "returning to rest after a pose must preserve the phenotype used by the latest full Apply");
+        }
+
+        [UnityTest]
+        public IEnumerator RegenerationReplacesTheOldRigHierarchy()
+        {
+            AnnyCharacter run = Spawn(AnnyUpdateMode.Exact);
+            Transform previous = run.Rig.Root;
+            run.Generate();
+            Transform current = run.Rig.Root;
+            Assert.AreNotSame(previous, current, "regeneration must build a fresh rig");
+
+            // Destroy is deferred in PlayMode. After one frame only the current rig may remain.
+            yield return null;
+            Assert.IsTrue(previous == null, "the previous rig root must be destroyed");
+            int liveRigs = 0;
+            for (int i = 0; i < run.transform.childCount; i++)
+            {
+                if (run.transform.GetChild(i).name == "anny_rig")
+                {
+                    liveRigs++;
+                }
+            }
+            Assert.AreEqual(1, liveRigs, "regeneration must not accumulate bone hierarchies");
+        }
+
         [UnityTest]
         public IEnumerator DisposingTheCharacterReleasesTheNativeModel()
         {

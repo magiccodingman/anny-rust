@@ -155,8 +155,10 @@ fn indices(t: &Tensor) -> Result<js_sys::Uint32Array, JsValue> {
 /// only for the pose. It holds its own reference to the model, so the model object may be dropped.
 #[wasm_bindgen]
 pub struct AnnySession {
-    _model: Arc<Anny>,
+    // SAFETY INVARIANT: fields drop in declaration order. The widened borrowed session must be
+    // destroyed before the Arc owner releases the model allocation.
     session: PoseSession<'static>,
+    _model: Arc<Anny>,
 }
 #[wasm_bindgen]
 impl AnnySession {

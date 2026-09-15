@@ -3,11 +3,9 @@
 The Unity package does **not** ship a working WebGL plugin. This records what was tried, the evidence,
 and what would unblock it, so the work is not repeated from scratch.
 
-> Status: `integrations/unity/package/Plugins/WebGL/` still contains `libanny.a` and
-> `anny-eh-shim.jslib` from this attempt. They are **not** a supported configuration: a WebGL player
-> build with them fails at link (step 7 below). Deleting them was blocked by the consent layer and is
-> pending owner approval; they are inert on every other platform, and `integrations/unity/.gitignore`
-> keeps them out of the repository until the link works.
+> Status: the unsupported generated WebGL plugin artifacts were deleted with owner approval and are
+> git-ignored. `tools/build-native-webgl.sh` can reproduce the experiment, but the Unity WebGL player
+> remains unsupported until the Rust/Emscripten unwind mismatch described below is resolved.
 
 ## Why this was attempted
 

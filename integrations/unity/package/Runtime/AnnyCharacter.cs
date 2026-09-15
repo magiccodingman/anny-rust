@@ -44,7 +44,7 @@ namespace Anny
         [Tooltip("Prepared model payload. Assigned by the Anny baker, or by hand from a .bytes asset.")]
         public AnnyModelAsset modelAsset;
 
-        [Tooltip("Runtime precision. The f64 model is the authority; f32 is the shipped default.")]
+        [Tooltip("Compatibility loading switch. Unity's live mesh runtime is always f32; when disabled the payload is opened wide and converted once before use.")]
         public bool singlePrecision = true;
 
         [Tooltip("Skinned drives Unity skinning from the bones; Exact uploads native posed vertices.")]
@@ -140,6 +140,20 @@ namespace Anny
                 Runtime.Dispose();
                 Runtime = null;
             }
+
+            if (Rig != null && Rig.Root != null)
+            {
+                GameObject rigObject = Rig.Root.gameObject;
+                if (Application.isPlaying)
+                {
+                    Destroy(rigObject);
+                }
+                else
+                {
+                    DestroyImmediate(rigObject);
+                }
+            }
+            Rig = null;
 
             if (GeneratedMesh != null)
             {
@@ -309,6 +323,20 @@ namespace Anny
             }
 
             lastOutput = output;
+
+            // A pose session is pinned to the phenotype/local/face coefficients it was created
+            // with. Any full parameter update therefore invalidates the previous session; rebuild
+            // it only after the new evaluation succeeds so a failed Apply leaves the old state intact.
+            if (Session != null)
+            {
+                Session.Dispose();
+                Session = null;
+            }
+            if (usePoseSession)
+            {
+                Session = Runtime.CreateSession(parameters);
+            }
+
             PushOutput(output);
         }
 
@@ -425,6 +453,11 @@ namespace Anny
                 Skinned.rootBone = Rig.Bones.Length > 0 ? Rig.Bones[0] : transform;
                 Skinned.sharedMaterial = ResolveMaterial();
                 Skinned.updateWhenOffscreen = true;
+                Skinned.enabled = true;
+                if (MeshRenderer != null)
+                {
+                    MeshRenderer.enabled = false;
+                }
                 return;
             }
 
@@ -442,6 +475,11 @@ namespace Anny
             }
 
             MeshRenderer.sharedMaterial = ResolveMaterial();
+            MeshRenderer.enabled = true;
+            if (Skinned != null)
+            {
+                Skinned.enabled = false;
+            }
         }
 
         private Material ResolveMaterial()

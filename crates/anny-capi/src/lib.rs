@@ -19,10 +19,11 @@ pub struct AnnyOutput {
 }
 /// A reusable pose session over a model; see `anny_session_new`.
 pub struct AnnySession {
-    /// Keeps the allocation the session evaluates against alive: the session's own reference points
-    /// into it, so it must be dropped with (in practice, after) the session.
-    _model: Arc<Anny>,
+    // SAFETY INVARIANT: Rust drops fields in declaration order. `session` contains the widened
+    // reference, so it must be destroyed before `_model` releases the Arc allocation it borrows.
     session: PoseSession<'static>,
+    /// Keeps the allocation the session evaluates against alive until after `session` is dropped.
+    _model: Arc<Anny>,
 }
 #[repr(C)]
 #[derive(Clone, Copy)]

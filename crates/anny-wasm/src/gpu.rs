@@ -28,6 +28,22 @@ fn parts(bytes: &[u8]) -> Result<(TensorF32, TensorF32, usize, usize), JsValue> 
     Ok((template, blendshapes, c, size))
 }
 
+fn validate_coefficients(coefficients: &[f32], batch: usize, c: usize) -> Result<(), JsValue> {
+    if batch == 0 || c == 0 {
+        return Err(js_error("batch and coefficient count must be nonzero"));
+    }
+    let expected = batch
+        .checked_mul(c)
+        .ok_or_else(|| js_error("coefficient shape overflow"))?;
+    if coefficients.len() != expected {
+        return Err(js_error(format!(
+            "expected {expected} coefficients for batch {batch} x {c}, got {}",
+            coefficients.len()
+        )));
+    }
+    Ok(())
+}
+
 /// The default character's own coefficients — 32 of 624 rows active — tiled
 /// `batch` times with those rows rotated and rescaled slightly per row, so a
 /// batch carries real sparsity rather than a dense synthetic fill.
@@ -62,6 +78,7 @@ pub fn cpu_blendshapes(
     batch: usize,
 ) -> Result<js_sys::Float32Array, JsValue> {
     let (template, blendshapes, c, size) = parts(bytes)?;
+    validate_coefficients(&coefficients, batch, c)?;
     let mut out = Vec::with_capacity(batch * size);
     for b in 0..batch {
         let row = TensorF32::new(vec![1, c], coefficients[b * c..(b + 1) * c].to_vec())
@@ -80,6 +97,7 @@ pub async fn gpu_blendshapes(
     batch: usize,
 ) -> Result<js_sys::Float32Array, JsValue> {
     let (template, blendshapes, c, _) = parts(bytes)?;
+    validate_coefficients(&coefficients, batch, c)?;
     let gpu = Gpu::open_async(None).await.map_err(js_error)?;
     // Browsers redact the adapter name, so record the backend alongside it: that is
     // what shows the call really went through WebGPU.

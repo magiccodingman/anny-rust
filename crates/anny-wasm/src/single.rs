@@ -110,8 +110,10 @@ impl AnnyResultF32 {
 /// reference to the model, so the model object may be dropped in JavaScript.
 #[wasm_bindgen]
 pub struct AnnySessionF32 {
-    _model: Arc<AnnyF32>,
+    // SAFETY INVARIANT: fields drop in declaration order. Keep the borrowed session before the
+    // Arc owner so destruction cannot release the model allocation first.
     session: PoseSessionF32<'static>,
+    _model: Arc<AnnyF32>,
 }
 #[wasm_bindgen]
 impl AnnySessionF32 {

@@ -10,9 +10,11 @@ pub struct AnnyOutputF32 {
 }
 /// A reusable single-precision pose session; see `anny_session_f32_new`.
 pub struct AnnySessionF32 {
-    /// Keeps the allocation the session evaluates against alive; see `AnnySession`.
-    _model: Arc<AnnyF32>,
+    // SAFETY INVARIANT: the borrowed session must drop before the Arc owner; fields drop in
+    // declaration order. See the f64 `AnnySession` for the ownership argument.
     session: PoseSessionF32<'static>,
+    /// Keeps the allocation alive until after `session` is dropped.
+    _model: Arc<AnnyF32>,
 }
 #[repr(C)]
 #[derive(Clone, Copy)]

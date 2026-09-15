@@ -87,9 +87,9 @@ through `examples/qualification/browser.cjs`, the full smoke with no page errors
 f32 pose sessions matching `evaluate` exactly and surviving their model being freed. That check is
 developer-only (it downloads Chromium) and CI runs the Node equivalent instead.
 
-Not verified here: browser *performance*, real licensed SMPL or SMPL-X assets, GPU
-implementations, exhaustive collision equivalence, or complete iterative optimizer
-equivalence. CI separately checks Windows/macOS builds and
+Not verified here: browser *performance*, real licensed SMPL or SMPL-X assets, exhaustive
+collision equivalence, or complete iterative optimizer equivalence. GPU/WebGPU implementation
+qualification is recorded later in this same document and in `docs/GPU.md`. CI separately checks Windows/macOS builds and
 the C# example; a checked-in validation record does not assert future CI results.
 
 ## Running the WebAssembly checks yourself

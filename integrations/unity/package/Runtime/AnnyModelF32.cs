@@ -160,7 +160,10 @@ namespace Anny
         {
             ThrowIfDisposed();
             AnnyNative.Check(AnnyNative.ModelF32PreparedBytes(handle, out IntPtr bytes));
-            return AnnyModel.CopyBytes(new AnnyBytesHandle(bytes));
+            using (AnnyBytesHandle owned = new AnnyBytesHandle(bytes))
+            {
+                return AnnyModel.CopyBytes(owned);
+            }
         }
 
         /// <summary>

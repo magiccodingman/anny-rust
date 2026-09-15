@@ -24,6 +24,8 @@ pub enum GpuError {
     Poll(#[from] wgpu::PollError),
     #[error("readback failed on the web backend")]
     WebReadback,
+    #[error("invalid GPU input: {0}")]
+    InvalidInput(String),
 }
 
 /// An open device plus the adapter it came from.
