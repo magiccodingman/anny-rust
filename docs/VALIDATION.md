@@ -13,6 +13,14 @@ Local validation against the pinned source, recorded September 13, 2026.
   but panics when a thread is created — the parallel helpers now take their sequential path on wasm32.
 - Full-model Python-reference parity: **23/23 passed**, absolute tolerance 1e-6, relative tolerance 0. Integer arrays and labels are exact.
 - Prepared Safetensors model -> native reload -> reference comparison: passed.
+- Browser editor -> real Chromium -> 14 UI checks: passed. `examples/qualification/editor-smoke.cjs`
+  drives `examples/editor/` in Chromium 145.0.7632.6 (developer-only, not run by CI) and records each
+  check as it goes: panels built from `describe()` (104 bones, 6 phenotype labels), a panel slider that
+  moves the mesh, the same parameter through the editor's own entry point, posing through the pose
+  session (`source: session`, 4.9 ms), an exact return to rest, GLB export accepted by the official
+  glTF validator (0 errors, skins present, 27,420 triangles), state save/load round trip, seeded
+  randomisation that repeats and differs by seed, a texture applied to the material, clip playback, and
+  27,420 triangles actually drawn by the viewport — with no page errors and a clean console.
 - The parallel BVH build produces the same tree as the sequential one, node for node
   (`mesh::build_tests::the_parallel_build_produces_the_sequential_tree`), and every real-data digest
   (`collision_native`, `prepared_payload`, `native_import`) is unchanged by it.

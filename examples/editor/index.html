@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Anny Rust editor</title>
+<link rel="stylesheet" href="editor.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three.module.js",
+    "three/addons/": "./vendor/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<header>
+  <h1>Anny Rust editor</h1>
+  <input id="model-path" type="text" spellcheck="false" aria-label="Model path">
+  <button id="load-model" title="Load a prepared ModelData Safetensors file">Load model</button>
+  <input id="model-file" type="file" accept=".safetensors" hidden>
+  <span class="spacer"></span>
+  <button id="save-state" title="Download the current parameters, pose and material">Save state</button>
+  <button id="load-state" title="Load a saved state file">Load state</button>
+  <input id="state-file" type="file" accept=".json" hidden>
+  <button id="export-glb" class="primary" title="Export the current character as GLB">Export GLB</button>
+</header>
+
+<main>
+  <aside id="panels">
+    <details open>
+      <summary>Model</summary>
+      <div class="body">
+        <div id="model-summary" class="summary">No model loaded.</div>
+        <label class="row">Batch index <input id="batch-index" type="number" min="0" value="0"></label>
+      </div>
+    </details>
+
+    <details open id="section-phenotype">
+      <summary>Phenotype</summary>
+      <div class="body controls" id="phenotype-controls"></div>
+    </details>
+
+    <details id="section-body">
+      <summary>Body</summary>
+      <div class="body controls" id="body-controls"></div>
+    </details>
+
+    <details id="section-face">
+      <summary>Face</summary>
+      <div class="body controls" id="face-controls"></div>
+    </details>
+
+    <details id="section-pose">
+      <summary>Pose</summary>
+      <div class="body">
+        <input id="bone-filter" type="search" placeholder="Filter bones…" spellcheck="false">
+        <div class="controls" id="pose-controls"></div>
+      </div>
+    </details>
+
+    <details id="section-material">
+      <summary>Material</summary>
+      <div class="body">
+        <label class="row">Colour <input id="material-colour" type="color" value="#b4b4b4"></label>
+        <label class="row">Roughness <input id="material-roughness" type="range" min="0" max="1" step="0.01" value="0.6"></label>
+        <label class="row">Metalness <input id="material-metalness" type="range" min="0" max="1" step="0.01" value="0"></label>
+        <label class="row">Texture <input id="material-texture" type="file" accept="image/png,image/jpeg"></label>
+        <label class="row"><input id="material-wireframe" type="checkbox"> Wireframe</label>
+        <div class="note" id="material-note"></div>
+      </div>
+    </details>
+
+    <details id="section-animation">
+      <summary>Animation</summary>
+      <div class="body">
+        <label class="row">Clip <input id="clip-file" type="file" accept=".json"></label>
+        <div class="row buttons">
+          <button id="clip-play">Play</button>
+          <button id="clip-reset">Reset</button>
+        </div>
+        <label class="row">Time <input id="clip-time" type="range" min="0" max="0" step="0.001" value="0"></label>
+        <label class="row">Speed <input id="clip-speed" type="range" min="0.1" max="2" step="0.05" value="1"></label>
+        <div class="note" id="clip-summary">No clip loaded. A clip is the <code>frames</code> JSON the CLI's <code>motion</code> command reads.</div>
+      </div>
+    </details>
+
+    <details id="section-presets">
+      <summary>Presets</summary>
+      <div class="body">
+        <div class="row buttons" id="preset-list"></div>
+        <label class="row">Random seed <input id="random-seed" type="number" value="1"></label>
+        <div class="row buttons">
+          <button id="randomise">Randomise</button>
+          <button id="reset-parameters">Reset</button>
+          <button id="save-preset">Save preset</button>
+        </div>
+      </div>
+    </details>
+  </aside>
+
+  <section id="viewport">
+    <canvas id="canvas"></canvas>
+    <div id="overlay">
+      <span id="stats"></span>
+    </div>
+    <div id="busy">Loading…</div>
+  </section>
+</main>
+<pre id="log"></pre>
+<script type="module" src="editor.js"></script>
+</body>
+</html>

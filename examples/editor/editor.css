@@ -1,0 +1,100 @@
+:root {
+  --bg: #14161a;
+  --panel: #1c1f25;
+  --line: #2c313a;
+  --text: #e6e8ec;
+  --dim: #9aa3b0;
+  --accent: #6ea8fe;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.45 system-ui, sans-serif;
+}
+header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+h1 { font-size: 14px; margin: 0 8px 0 0; font-weight: 600; }
+.spacer { flex: 1; }
+button {
+  background: #262b33;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 5px 10px;
+  font: inherit;
+  cursor: pointer;
+}
+button:hover { border-color: var(--accent); }
+button.primary { background: #1d3a63; border-color: #2f5b96; }
+input[type="text"], input[type="search"], input[type="number"] {
+  background: #101317;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 5px 8px;
+  font: inherit;
+}
+#model-path { width: 22rem; }
+main { flex: 1; display: flex; min-height: 0; }
+#panels {
+  width: 25rem;
+  overflow-y: auto;
+  border-right: 1px solid var(--line);
+  background: var(--panel);
+}
+details { border-bottom: 1px solid var(--line); }
+summary {
+  cursor: pointer;
+  padding: 8px 10px;
+  font-weight: 600;
+  user-select: none;
+}
+.body { padding: 0 10px 10px; }
+.summary, .note { color: var(--dim); }
+.note { margin-top: 8px; font-size: 12px; }
+.row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+.row.buttons { flex-wrap: wrap; }
+.controls { display: flex; flex-direction: column; gap: 6px; max-height: 22rem; overflow-y: auto; }
+.control { display: grid; grid-template-columns: 1fr 4.5rem 3.2rem; align-items: center; gap: 6px; }
+.control > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.control input[type="range"] { width: 100%; }
+.control output { text-align: right; color: var(--dim); font-variant-numeric: tabular-nums; }
+.bone { border: 1px solid var(--line); border-radius: 5px; padding: 6px 8px; }
+.bone > summary { padding: 0; font-weight: 500; }
+.bone .control { grid-template-columns: 3.2rem 1fr 3.2rem; }
+#viewport { position: relative; flex: 1; min-width: 0; }
+#canvas { width: 100%; height: 100%; display: block; }
+#overlay { position: absolute; top: 8px; left: 10px; color: var(--dim); pointer-events: none; }
+#busy {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: #0d0f1299;
+  font-size: 15px;
+}
+#busy.on { display: flex; }
+#log {
+  margin: 0;
+  max-height: 8rem;
+  overflow-y: auto;
+  padding: 6px 10px;
+  background: #101317;
+  border-top: 1px solid var(--line);
+  color: var(--dim);
+  font: 12px/1.4 ui-monospace, monospace;
+  white-space: pre-wrap;
+}
+#log:empty { display: none; }

@@ -181,5 +181,7 @@
   "wasm_node_execution_passed": "pose sessions (f64 and f32) match evaluate exactly and survive their model being freed",
   "browser_execution_tested": true,
   "browser_execution": "Chromium 145.0.7632.6 through examples/qualification/browser.cjs (developer-only, not run by CI): full smoke passed with no page errors, including the f64 and f32 pose sessions matching evaluate exactly and surviving their model being freed",
+  "browser_editor_tested": true,
+  "browser_editor_execution": "Chromium 145.0.7632.6 through examples/qualification/editor-smoke.cjs (developer-only, not run by CI): 14/14 checks passed with no page errors and a clean console - panels built from describe(), a panel slider that moves the mesh, the same parameter through the editor's own entry point, posing through the pose session, an exact return to rest, GLB export accepted by the official glTF validator (0 errors, skins present), state save/load round trip, seeded randomisation, a texture applied to the material, clip playback, and 27,420 triangles drawn",
   "real_smpl_assets_tested": false
 }
