@@ -160,16 +160,21 @@ Both backends currently report:
 ```
 ANNY-PLAYER-SMOKE ok vertices=13718 meshverts=82260 tris=27420 bones=104 influences=9 volume=0.05101393 runtime=mono
 ANNY-PLAYER-SMOKE ok vertices=13718 meshverts=82260 tris=27420 bones=104 influences=9 volume=0.05101392 runtime=il2cpp
-ANNY-PLAYER-PERF ok runtime=mono iterations=20 phenotype_ms=0.561/0.57 pose_ms=0.323/0.383 updates=40
-ANNY-PLAYER-PERF ok runtime=il2cpp iterations=20 phenotype_ms=0.555/0.698 pose_ms=0.309/0.404 updates=40
+ANNY-PLAYER-PERF ok runtime=mono iterations=20 phenotype_ms=15.835/18.559 pose_ms=0.289/0.324 updates=40
+ANNY-PLAYER-PERF ok runtime=il2cpp iterations=20 phenotype_ms=10.898/13.156 pose_ms=0.267/0.278 updates=40
 ```
 
 The perf phase measures what a game actually pays per update: 20 phenotype changes (`SetPhenotype` + `Apply`,
 the full re-evaluation path) and 20 pose-only updates through the native session, reporting the fastest and the
-median update in milliseconds. The median is **0.57 ms (Mono) / 0.70 ms (IL2CPP)** for a phenotype change and
-**0.38 ms / 0.40 ms** for a session pose update — under 3% of a 60 fps frame either way. The ~0.19 ms the session
-saves is the native evaluation the runtime documents, so what is left is the Unity-side push, and IL2CPP tracking
-Mono says marshalling is not a cliff.
+median update in milliseconds, re-measured on an idle machine. A session pose update — the per-frame path —
+costs **0.32 ms (Mono) / 0.28 ms (IL2CPP)**. A phenotype change costs **18.6 ms / 13.2 ms**, well above the
+0.57/0.70 ms this phase used to report, and the difference is the shape-change correction described in
+`docs/VALIDATION.md`: the player's
+character runs in `AnnyUpdateMode.Skinned`, so a full shape update now rebuilds the phenotype-dependent bind
+geometry, bind poses and rig instead of leaving Unity to skin the previous shape's rest surface. A shape change
+is a character-creation or body-slider event, not a frame; when a shape changes every frame, drive it through a
+session and pose. The ~0.19 ms the session saves is still the native evaluation the runtime documents, and
+IL2CPP tracking Mono says marshalling is not a cliff.
 
 The phase also checks `AnnyCharacter.Evaluations`, which counts one update per call (`Generate` counts as the
 first, then one per `Apply` or session pose update) and fails unless the delta is exactly two per iteration —

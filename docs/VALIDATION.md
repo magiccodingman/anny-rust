@@ -14,7 +14,7 @@ Local validation against the pinned source, recorded September 13, 2026.
 - Full-model Python-reference parity: **23/23 passed**, absolute tolerance 1e-6, relative tolerance 0. Integer arrays and labels are exact.
 - Prepared Safetensors model -> native reload -> reference comparison: passed.
 - Browser editor -> real Chromium -> 14 UI checks: passed. `examples/qualification/editor-smoke.cjs`
-  drives `examples/editor/` in Chromium 145.0.7632.6 (developer-only, not run by CI) and records each
+  drives `examples/editor/` in Google Chrome 152.0.7977.64 (system Chrome via `CHROMIUM_PATH`; developer-only, not run by CI) and records each
   check as it goes: panels built from `describe()` (104 bones, 6 phenotype labels), a panel slider that
   moves the mesh, the same parameter through the editor's own entry point, posing through the pose
   session (`source: session`, 4.9 ms), an exact return to rest, GLB export accepted by the official
@@ -23,25 +23,31 @@ Local validation against the pinned source, recorded September 13, 2026.
   27,420 triangles actually drawn by the viewport — with no page errors and a clean console. Two
   independent sessions produced identical geometry digests at every stage, so the whole WASM →
   browser → geometry pipeline is reproducible run to run, not only within a session. Re-qualified 14/14 on
-  Google Chrome 152.0.7977.64 when the WebGPU module was added to the artifact.
-- Browser GPU -> WebGPU -> 7 checks: passed. `examples/qualification/webgpu-smoke.cjs` imports the same
+  Google Chrome 152.0.7977.64 in the final merge-gate pass, against the module rebuilt from that tree
+  (2,323,922 bytes, sha256 `2327bdf4…`): the editor suite's fourteen checks are the ones listed above,
+  re-run in full rather than inferred from the digest.
+- Browser GPU -> WebGPU -> 8 checks: passed. `examples/qualification/webgpu-smoke.cjs` imports the same
   artifact into Google Chrome 152.0.7977.64 (system Chrome via `CHROMIUM_PATH`; the bundled Playwright
   browsers are only ever partial on this machine) with `--enable-unsafe-webgpu`, builds the default
   character's own coefficients (128 of 2496 nonzero, 5.13% — the same sparsity as natively), and compares
   the WebGPU result against the f32 CPU reference computed in the same page: **worst absolute difference
   0** across 4 x 41,154 values at batch 4, reproduced exactly on a second run, with no page errors. The
   adapter name is redacted by Chrome, so the check records ` [BrowserWebGpu]` — the backend is what shows
-  the call really went through WebGPU instead of silently falling back. Both browser suites ran against
-  the same `anny_wasm_bg.wasm` (2,321,153 bytes, sha256 `200aa38afbb8a1df858299a37d5a7ab195ee8e14fd9d1b84666c94160e426fbb`).
-  That digest was re-measured after the instance-serialization change in `crates/anny-gpu`: the rebuild has
-  the same size and a different hash, because panic locations embed file and line, so both suites were
-  re-run against the rebuilt module rather than assumed equivalent — 14/14 and 7/7 again, `worst: 0`
-  unchanged, adapter still ` [BrowserWebGpu]`.
+  the call really went through WebGPU instead of silently falling back. A further check covers malformed
+  caller input: a coefficient array three values short of `batch x c` and a zero batch both come back as
+  ordinary JS errors ("expected 2496 coefficients for batch 4 x 624, got 2493"), so bad input is an error
+  rather than a Rust trap or a wgpu validation failure. Both browser suites ran against the same
+  `anny_wasm_bg.wasm` (2,323,922 bytes, sha256 `2327bdf40b5d3629868fd97d832ae9852871275cd42bfa30f8014e1b4307053d`),
+  rebuilt from the final tree and verified byte-identical to a fresh rebuild of that tree with `cmp`. An
+  earlier rebuild at a different revision came out the same size as its predecessor with a different hash,
+  because panic locations embed file and line, so the digest — not the size — identifies the qualified
+  artifact, and both suites were re-run against this one rather than assumed equivalent: 14/14 and 8/8,
+  `worst: 0` unchanged, adapter still ` [BrowserWebGpu]`.
 - The parallel BVH build produces the same tree as the sequential one, node for node
   (`mesh::build_tests::the_parallel_build_produces_the_sequential_tree`), and every real-data digest
   (`collision_native`, `prepared_payload`, `native_import`) is unchanged by it.
 - Written payloads are byte-identical across processes for both writers (`tests/payload_determinism.rs`, which spawns two child processes because a per-process hash seed cannot be observed from inside one). Only the header changed: a pre-fix and a post-fix payload carry the same metadata, have the same header length, and all 14 tensors compare equal — and the reference Python `safetensors` reader opens the rewritten file.
-- Real C executables calling ABI 1 generated 13,718 vertices / 27,420 faces from imported assets, and pose sessions matched `evaluate` exactly (f64 and f32), including after the model handle was freed. The .NET example asserts the same for both managed session wrappers.
+- Real C executables calling ABI 1 generated 13,718 vertices / 27,420 faces from imported assets, and pose sessions matched `evaluate` exactly (f64 and f32), including after the model handle was freed. The .NET example asserts the same for both managed session wrappers. The session-lifetime correction in this delta was exercised further by a throwaway harness (kept out of the repository): 200 pose updates on a session whose model handle had already been freed and bit-identical to the reference, 200 f64 plus 200 f32 create/update/free cycles, and 60 sessions destroyed after their model — all clean under `MALLOC_CHECK_=3` and `MALLOC_PERTURB_=170`. No sanitizer is available on this host (no valgrind, and Miri cannot drive the C ABI), so the field order was falsified by mutation instead: swapping the declaration back still passed the same harness here, which is why the fix is recorded as an invariant fix — the session's `Drop` never dereferences the borrowed model — rather than as an observable crash. The browser-side equivalent of the same correction is the two `browser.cjs` checks that a f64 and an f32 pose session survive their model being freed, which pass against the rebuilt module.
 - Native two-iteration fitting smoke completed on real default-mesh data; resulting mean vertex error 0.0082489114 m. This is a functional smoke, not optimizer trajectory parity or a convergence benchmark.
 - Native calibrated sampling read the original distributions and generated valid parameters from seed 42.
 
@@ -128,8 +134,8 @@ and renderer, prints one line and exits with a status code.
 
 | Player | Build | Ran | Result |
 | --- | --- | --- | --- |
-| Linux Mono | Succeeded, 97,037,827 B | yes | `vertices=13718 meshverts=82260 tris=27420 bones=104 influences=9 volume=0.05101393` |
-| Linux IL2CPP | Succeeded, 284,477,938 B | yes | `vertices=13718 meshverts=82260 tris=27420 bones=104 influences=9 volume=0.05101392` |
+| Linux Mono | Succeeded, 97,050,563 B | yes | `vertices=13718 meshverts=82260 tris=27420 bones=104 influences=9 volume=0.05101393` |
+| Linux IL2CPP | Succeeded, 287,236,840 B | yes | `vertices=13718 meshverts=82260 tris=27420 bones=104 influences=9 volume=0.05101392` |
 
 Both backends produce the same geometry, topology, influence width, bone count and signed volume; the
 signed volume differs in the last float digit only. The marshalling of the tensor views, the
@@ -152,18 +158,28 @@ prepared model the other surfaces use (`output/ci-model.safetensors`, 13,718 ver
   rather than by name, the thumb/pinky order taken from the hand geometry, a description that covers
   the whole skeleton, a valid Unity avatar, a hierarchy the mapping leaves untouched, and a rig
   missing required bones being reported rather than guessed.
-* **PlayMode 11/11.** Generation, phenotype updates, disposal, the pose session path in a live loop,
-  skinned-mode bake parity, animation-clip playback parity, the physics surface, and the update
+* **PlayMode 14/14.** Generation, phenotype updates, disposal, the pose session path in a live loop,
+  skinned-mode bake parity, animation-clip playback parity, the physics surface, the update
   counter: `Evaluations` advances by exactly one per `Generate`/`Apply`/session pose update, which is
-  what lets a caller tell a re-evaluation from a reused session.
+  what lets a caller tell a re-evaluation from a reused session — and the three regressions the
+  corrections in this delta exist to prevent: a phenotype change rebuilds the pose session before the
+  next pose, so a later pose update cannot silently return to the original coefficients; a Skinned
+  phenotype change replaces the bind geometry, bind poses and rig and still bakes within the measured
+  tolerance; and repeated regeneration replaces the old rig hierarchy instead of accumulating it. Each
+  of the three was mutation-checked by reverting only the correction it guards — each failed, and
+  nothing else ran in that filtered run — with the source restored byte-clean afterwards.
 
 Unity's own verdict on the humanoid avatar is recorded rather than paraphrased: `AnnyHumanoid.Build`
 returns one for which `isHuman` and `isValid` are both true, and the editor logs `mapped 54/104 bones
 onto 54 humanoid slots, missing 0 required, 50 bones left outside the humanoid definition; valid=True
 human=True`. The 50 bones outside the definition are named in `integrations/unity/README.md`:
-humanoid playback approximates Anny's pose, and baked Anny clips remain the exact path. The counts in
-this section were stale at 21/21 and 5/5 before this pass and are now the numbers the runs actually
-produced.
+humanoid playback approximates Anny's pose, and baked Anny clips remain the exact path. Both counts in
+this section were stale at 21/21 and 5/5 earlier in the project; they were corrected to 34/34 and 11/11 in
+the pass that followed, and the PlayMode count moved again to 14/14 when the three regressions above were
+added. Every number quoted here is one the runs on this tree produced, not a carried-over figure. The
+native plugin the editor and the players exercise was rebuilt from this tree before any of it ran: the
+committed binary predated the session-lifetime correction, and the staged replacement is 3,863,512 bytes
+(sha256 `37f5c50c…`), the same file found inside both built players.
 
 Exactness and tolerance are separated deliberately. The mesh is compared against the native array it
 was built from at zero tolerance (0 m). Skinning is compared at a measured tolerance:
@@ -185,14 +201,19 @@ evaluation, moving 27,436 vertices with a largest displacement of 0.229793 m.
 The same measurement now also runs inside the built players, where a game actually pays it:
 
 ```
-ANNY-PLAYER-PERF ok runtime=mono iterations=20 phenotype_ms=0.561/0.57 pose_ms=0.323/0.383 updates=40
-ANNY-PLAYER-PERF ok runtime=il2cpp iterations=20 phenotype_ms=0.555/0.698 pose_ms=0.309/0.404 updates=40
+ANNY-PLAYER-PERF ok runtime=mono iterations=20 phenotype_ms=15.835/18.559 pose_ms=0.289/0.324 updates=40
+ANNY-PLAYER-PERF ok runtime=il2cpp iterations=20 phenotype_ms=10.898/13.156 pose_ms=0.267/0.278 updates=40
 ```
 
-Fastest/median per update: a phenotype change costs **0.57 ms** under Mono and **0.70 ms** under
-IL2CPP, a session pose update **0.38 ms** and **0.40 ms** — under 3% of a 60 fps frame, with IL2CPP
-showing no marshalling cliff. The session saves ~0.19 ms per update, which is the native evaluation
-the runtime documents, so the remainder is Unity-side push. `updates=40` is the phase's own check
+Fastest/median per update, re-measured on an idle machine: a session pose update costs **0.32 ms** under
+Mono and **0.28 ms** under IL2CPP — that is the per-frame path, and it is the same ~0.3 ms it was before
+the correction, with IL2CPP showing no marshalling cliff. A phenotype change now costs **18.6 ms** under
+Mono and **13.2 ms** under IL2CPP against 0.57 ms and 0.70 ms previously, because the player's character
+runs in `AnnyUpdateMode.Skinned` and a full shape update rebuilds the phenotype-dependent bind geometry,
+bind poses and rig. That is the correction working: the old, fast number was a body Unity could still skin
+from the previous shape's rest surface. The cost is paid on a shape change (character creation, a body
+slider) rather than per frame, and the build-time figures were re-measured here rather than kept because
+they were taken while the il2cpp build was running. `updates=40` is the phase's own check
 that `AnnyCharacter.Evaluations` advanced by exactly two per measured iteration (one `Apply`, one
 `ApplyPose`), so session reuse is asserted rather than assumed.
 
@@ -229,21 +250,31 @@ tolerance. One intermediate failure was a wrong expectation in the test, not a d
 one frame apart span two frames, so the clip is `(keys - 1) / frameRate` seconds long, which is what the
 bakery already returned.
 
-## Rust gates after the GPU production-parity work (2026-09-15)
+## Rust gates on the final merge-gate tree (2026-09-15)
 
-`cargo fmt --all --check` clean; `cargo test --workspace --release` **101 passed, 0 failed, 16
-ignored** across 34 suites; `cargo clippy --workspace --all-targets --release` clean;
-`cargo check -p anny-wasm --target wasm32-unknown-unknown --locked` clean. Two of the three
-`anny-gpu` parity tests changed in this window, so the previously pinned release-mode digests and
-the earlier release run no longer describe this tree; the numbers above are the current run. The
-16 ignored tests are the opt-in ones (authoring regeneration and fixtures).
+The full mandated battery was run against this tree, debug and release: `cargo fmt --all -- --check`
+clean; `cargo test --workspace --locked` and `cargo test --workspace --release` each **107 passed, 0
+failed, 16 ignored** across **35 suites**, cargo exit 0 (the extra suite is
+`crates/anny-gpu/tests/boundaries.rs`, added in this pass); `cargo clippy --workspace --all-targets
+--locked -- -D warnings`, and the same with `--release`, clean; `cargo check -p anny-wasm --target
+wasm32-unknown-unknown --locked` clean; `cargo build --workspace --release --locked` clean. The 16 ignored
+tests are the real-data opt-in suites: run with `-- --ignored` against this tree they are **16 passed, 0
+failed**, and every real-data digest they assert (`collision_native`, `prepared_payload`, `native_import`)
+is unchanged, which is the evidence that this delta did not move the core evaluation equations.
 
-`ANNY_REQUIRE_GPU=1 cargo test -p anny-gpu --release` **3 passed** — the strict gate, which turns the
-"no adapter" skip into a failure, so a run that never reached the GPU cannot be mistaken for a passing
-one. It measures the kernel against the f32 evaluator for synthetic vectors (9.5e-7 at batch 1 through
-1.9e-6 at batch 64) and, in a third case, for coefficients taken from the shipped phenotype path: 1.8e-7
+`ANNY_REQUIRE_GPU=1 cargo test -p anny-gpu --release -- --nocapture` **4 passed** on an NVIDIA GeForce RTX
+3090 through Vulkan — the strict gate, which turns the "no adapter" skip into a failure, so a run that
+never reached the GPU cannot be mistaken for a passing one. It measures the kernel against the f32
+evaluator for synthetic vectors (9.5e-7 at batch 1 through 1.9e-6 at batch 64) and, in a third case, for
+coefficients taken from the shipped phenotype path: 1.8e-7
 for the default character, 2.4e-7 and 4.8e-7 for two batched variations, all inside the 1e-5 bound, with
-the resident-weights path bit-identical to the one-shot path.
+the resident-weights path bit-identical to the one-shot path. The fourth case is the boundary this delta
+added: given a coefficient slice one short of batch x c, a batch multiplier that would overflow, and a zero
+batch, both the resident and the one-shot entry points return `InvalidInput` instead of slicing out of
+range, and a valid call through the same objects still succeeds afterwards. The independent software-adapter
+control (`cargo run -p anny-gpu --release --example parity_blendshapes -- <model> llvmpipe`) is bit-exact
+for both paths; the five shape rules are also covered without any device at all in `tests/boundaries.rs`,
+so a machine with no adapter still tests them.
 
 That suite also exposed a real crash, since fixed: with three tests creating instances at once it
 aborted with `double free or corruption (fasttop)` in 7 of 25 runs. The fault is not in this project —

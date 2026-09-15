@@ -67,7 +67,7 @@ The project supports the base-glTF subset it validates; unsupported extensions/c
 
 Rust exposes the broadest native surface directly. Shared C/C#/WASM operations cover model construction/evaluation plus measurements, keypoints, sampling/prior, fitting, pose operations, transforms, GLB/prepared bytes, collision queries, JVP/VJP/refinement and glTF byte editing/query paths.
 
-The .NET code is an interoperability layer/example, **not yet the deferred full Unity package**.
+The .NET code is an interoperability layer/example; the Unity Runtime/Editor package is separate and lives in `integrations/unity`.
 
 ## Intentional differences from Python/PyTorch
 
@@ -85,14 +85,20 @@ Sampling preserves its modeled distributions but uses native RNG algorithms. CPU
 
 ## Performance boundary
 
-Native v1 establishes correctness and portability. It does **not** yet claim a finished GPU backend, WebGPU acceleration, architecture-specific SIMD tuning, real-time throughput or fully optimized allocations/layout.
+Native v1 established correctness and portability. The phase that followed delivered the items this section
+used to list as future work, each at measured scope rather than at its most ambitious reading:
 
-Those are the explicit next phase:
+1. **GPU/WebGPU backend** — a real wgpu/WebGPU blendshape-contraction backend with resident weights and
+   production-derived parity (`docs/GPU.md`). It is deliberately not wired into the normal evaluator: it is
+   slower than the CPU for single-character and common sparse work, and its end-to-end ceiling is small.
+2. **SIMD tuning** — measured and declined as the bottleneck: the ceiling through `-C target-cpu=x86-64-v3`
+   is 5-15%, so wider CPU targets remain opt-in rather than default.
+3. **Unity Runtime/Editor package** — built and validated against the installed Unity 6000.6.0f1: EditMode
+   and PlayMode suites, a Unity-accepted humanoid avatar, and both Linux players built and run.
+4. **Browser character editor** — built in `examples/editor/` and driven by a real-Chrome qualification
+   suite, together with the browser WebGPU path.
+5. **Performance optimization** — profiling-driven and measured, with the numbers and their limits in
+   `docs/PERFORMANCE.md`, including what a game pays per update inside the built players.
 
-1. GPU/WebGPU backend.
-2. SIMD tuning.
-3. Unity Runtime/Editor package.
-4. Complete browser character editor.
-5. Profiling-driven serious performance optimization.
-
-The existing WASM runtime has been executed successfully in Chromium; that should not be confused with the still-deferred complete browser editor or WebGPU backend.
+Deliberately not claimed: zero-copy/mmap loading (declined), Unity WebGL players (blocked by the Rust
+unwind path in Emscripten, documented in `docs/UNITY_WEBGL.md`), and GPU traversal parity for collision.

@@ -63,7 +63,7 @@ GitHub run `34852529881`, source `d79f80004a775f93a596b86c3d331f25c994e74c`, per
 - Maximum browser f32/f64 position difference: `9.214082392627887e-7`.
 - The GLB authored in-browser passed Khronos glTF Validator with **0 errors and 0 warnings** (informational notices only).
 
-This validates the native browser API surface; it is not the deferred complete browser character-editor UI or a browser performance benchmark.
+This validates the native browser API surface; it is not a browser performance benchmark, and the editor UI it does not cover was built later in `examples/editor/` and is qualified separately in a real Chrome (`docs/VALIDATION.md`).
 
 ## Native interfaces
 

@@ -430,16 +430,23 @@ Every number above is the library's own cost. What a game pays was measured insi
 (`integrations/unity/tools/build-players.sh`, which now reports and checks the line):
 
 ```
-ANNY-PLAYER-PERF ok runtime=mono iterations=20 phenotype_ms=0.561/0.57 pose_ms=0.323/0.383 updates=40
-ANNY-PLAYER-PERF ok runtime=il2cpp iterations=20 phenotype_ms=0.555/0.698 pose_ms=0.309/0.404 updates=40
+ANNY-PLAYER-PERF ok runtime=mono iterations=20 phenotype_ms=15.835/18.559 pose_ms=0.289/0.324 updates=40
+ANNY-PLAYER-PERF ok runtime=il2cpp iterations=20 phenotype_ms=10.898/13.156 pose_ms=0.267/0.278 updates=40
 ```
 
-Median cost per update: **0.57 ms (Mono) / 0.70 ms (IL2CPP)** for a phenotype change — full
-re-evaluation plus the Unity-side push — and **0.38 ms / 0.40 ms** for a pose-only update through the
-native session, so an update is under 3% of a 60 fps frame either way. Two conclusions follow. The
-session saves ~0.19 ms, which is the native evaluation, so the Unity-side push is now the larger term
-and further work on the model path cannot move a frame much. And IL2CPP costs what Mono costs, so
-marshalling and `SafeHandle` handling are not a cliff worth optimising.
+Median cost per update, re-measured on an idle machine: **0.32 ms (Mono) / 0.28 ms (IL2CPP)** for a
+pose-only update through the native session, and **18.6 ms / 13.2 ms** for a phenotype change. Those two
+numbers moved in opposite directions for a reason worth stating. The pose path is unchanged — it is the
+native evaluation plus a small Unity-side push, and the session still saves ~0.19 ms. The phenotype path is
+not: the player's character runs in `AnnyUpdateMode.Skinned`, and a full shape update now rebuilds the
+phenotype-dependent bind geometry, bind poses and rig, so the shape change pays for a mesh and a skeleton
+rather than only an evaluation. Before that correction the fast number was measuring a bug — Unity went on
+skinning the previous shape's rest surface. IL2CPP is still not slower than Mono in any way that shows a
+marshalling cliff, but the honest summary is now "a pose update is ~0.3 ms; a body change is ~10-19 ms",
+and a game that changes body shape per frame should keep a session and pose instead, which is exactly what
+the session path is for. The remaining optimization worth considering is updating bind geometry in place
+instead of recreating the mesh and rig objects; that is a change to the Unity surface, not to the model
+path, and it has not been made.
 
 ## Ranking of remaining work, by measured upside
 
@@ -474,7 +481,7 @@ marshalling and `SafeHandle` handling are not a cliff worth optimising.
    materializing blendshapes a configuration never uses.
 5. **GPU/WebGPU, Unity integration, browser editor — delivered after this ranking was written.** The GPU
    kernel is parity-qualified on native and browser targets and left unwired by measurement (item 1 of
-   `docs/GPU.md`); the Unity package ships with EditMode 34/34 and PlayMode 11/11, including a humanoid
+   `docs/GPU.md`); the Unity package ships with EditMode 34/34 and PlayMode 14/14, including a humanoid
    avatar Unity itself accepts; the browser editor passes 14/14 against real Chrome. What remains here is
    not unmeasured work but the same decision the collision item carries: wiring a stage whose measured
    win does not exist yet. Session exposure to the CLI, C, C#, WASM and the browser is done and tested,

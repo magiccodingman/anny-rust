@@ -152,7 +152,7 @@ No dependency bump was needed. wgpu 26.0.1's wasm dependencies are `js-sys = "0.
 workspace already pins. The earlier note in this file quoted `js-sys ^0.3.104` — that is wgpu **30**'s
 requirement, not the version in use, so the browser target was never blocked by that pin.
 
-Evidence — `examples/qualification/webgpu-smoke.cjs`, 7/7 checks in Google Chrome 152.0.7977.64
+Evidence — `examples/qualification/webgpu-smoke.cjs`, 8/8 checks in Google Chrome 152.0.7977.64
 (system Chrome via `CHROMIUM_PATH`, `--enable-unsafe-webgpu`), run against the same artifact the editor
 suite passes 14/14 with:
 
@@ -163,6 +163,7 @@ suite passes 14/14 with:
 | coefficient workload | 128/2496 nonzero (5.13%) — the same sparsity as natively |
 | GPU vs f32 CPU reference | **worst 0** at batch 4 (41,154 values per row), tolerance 1e-5 |
 | second run | worst 0 |
+| malformed coefficient length / zero batch | ordinary JS errors, no trap (`expected 2496 coefficients for batch 4 x 624, got 2493`) |
 | page errors | none (one favicon 404 ignored) |
 | adapter | name redacted by Chrome; reported as ` [BrowserWebGpu]` |
 
@@ -172,8 +173,8 @@ The browser kernel is therefore **bit-identical** to the CPU reference in Chrome
 claim: each call re-uploads the ~103 MB blendshape tensor and batch 4 sits below the measured native
 crossover, exactly as the numbers above predict. The browser path is qualified for agreement, not speed.
 
-Cost: with the module enabled the browser artifact grows by **88,204 bytes** (86 KiB): `bg.wasm`
-2,232,949 → 2,321,153 bytes (+3.9%), measured by building once with `pub mod gpu;` disabled and running
+Cost: with the module enabled the browser artifact grows by **90,977 bytes** (88.8 KiB): `bg.wasm`
+2,232,945 → 2,323,922 bytes (+4.1%), measured by building once with `pub mod gpu;` disabled and running
 the same `wasm-bindgen` step on both.
 
 ## Not done (with reasons)

@@ -56,7 +56,7 @@ The original successor workstream has now been carried through as follows:
    what rules hand-written SIMD out (`docs/PERFORMANCE.md`).
 3. Unity Runtime/Editor package — delivered: UPM package, native binary packaging, managed ownership,
    mesh and bone integration including a humanoid avatar Unity itself accepts, editor controls and
-   baking; EditMode 34/34, PlayMode 11/11, both Linux players built and run
+   baking; EditMode 34/34, PlayMode 14/14, both Linux players built and run
    (`integrations/unity/README.md`).
 4. Complete browser character editor — delivered: preview with phenotype/body/face/pose controls,
    material controls, clip playback, presets and randomize, and GLB export; 14/14 against real Chrome.
@@ -69,10 +69,11 @@ The original successor workstream has now been carried through as follows:
    `js-sys`/`wasm-bindgen` versions this workspace pins, so no bump was needed and the 14/14 editor result
    was re-qualified on the new artifact rather than invalidated.
 6. Runtime-side cost accounting — closed for the Unity surface: the players now measure and check the
-   cost a game actually pays per update (`ANNY-PLAYER-PERF`), which is 0.57 ms median for a phenotype
-   change and 0.38 ms for a session pose update under Mono, 0.70/0.40 ms under IL2CPP, with a counter
-   assertion proving the session was reused. The Unity-side push, not the model, is now the larger
-   term, so a faster model path would not move a frame.
+   cost a game actually pays per update (`ANNY-PLAYER-PERF`), which is 18.6 ms median for a phenotype
+   change and 0.32 ms for a session pose update under Mono, 13.2/0.28 ms under IL2CPP, with a counter
+   assertion proving the session was reused. The pose path is the per-frame one and it did not move when
+   the Skinned shape-change path was corrected; the phenotype figure is a mesh-and-skeleton rebuild
+   (`docs/PERFORMANCE.md` says why), so "a body change" and "a frame" are now different prices.
 
 Progress against that list is recorded in `docs/PERFORMANCE.md`: the prepare/reload, tensor-decode, precision-conversion and collision hot paths are done (9.6×, 2.1×, 1.82×, and 2.3× on the BVH build that dominated the remaining collision frame); the pose session is reachable from Rust, the CLI, C, C#, the WASM bindings and the browser; the serialized payload is byte-reproducible across processes; and the browser editor is built and passes 14 checks in a real Chromium (`examples/qualification/editor-smoke.cjs`). Zero-copy loading is decided rather than pending, and declined, in the section of `docs/PERFORMANCE.md` that states what an mmap path would preserve and what a trusted/prevalidated artifact path would have to be. Since then Unity has been integrated against the real installed editor and both Linux players build and run; the GPU backend has its first measured kernel (`docs/GPU.md`); the remaining CPU work is what is left.
 
@@ -85,7 +86,7 @@ If further agentic work is performed in a transient browser environment, keep us
 ### Unity is integrated, validated in the editor, and now in real players, with editor controls, physics and humanoid avatars
 
 `integrations/unity/` holds UPM package `com.magiccodingman.anny` (native plugin, runtime, editor
-tooling, tests) plus the host project the tests run in. EditMode 34/34 and PlayMode 11/11 pass against
+tooling, tests) plus the host project the tests run in. EditMode 34/34 and PlayMode 14/14 pass against
 the real editor and a real model; see VALIDATION.md for the numbers and the two defects the runs found.
 `AnnyHumanoid` adds a Unity humanoid avatar for the rig, accepted by Unity itself (`valid=True
 human=True`); what the humanoid definition cannot carry is named in `integrations/unity/README.md`.
