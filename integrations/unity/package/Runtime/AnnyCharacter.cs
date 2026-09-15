@@ -86,6 +86,11 @@ namespace Anny
         /// <summary>Phenotype labels the generated model exposed, in native order.</summary>
         public string[] PhenotypeLabels { get; private set; }
 
+        /// <summary>
+        /// Updates applied since this character last generated: <see cref="Generate"/> counts as the
+        /// first one and every <see cref="Apply"/> or session pose update adds exactly one, so a
+        /// caller can tell a re-evaluation from a reused pose session by the delta.
+        /// </summary>
         public int Evaluations { get; private set; }
 
         /// <summary>
@@ -351,7 +356,9 @@ namespace Anny
             }
 
             AnnySkeleton.ApplyPose(Rig, evaluation);
-            Evaluations++;
+
+            // `Evaluations` is advanced by the entry points (Generate/Apply/ApplyPose) only, so one
+            // update is one count no matter which path pushed it.
         }
 
         /// <summary>

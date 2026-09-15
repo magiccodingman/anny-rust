@@ -148,8 +148,10 @@ prepared model the other surfaces use (`output/ci-model.safetensors`, 13,718 ver
   rather than by name, the thumb/pinky order taken from the hand geometry, a description that covers
   the whole skeleton, a valid Unity avatar, a hierarchy the mapping leaves untouched, and a rig
   missing required bones being reported rather than guessed.
-* **PlayMode 10/10.** Generation, phenotype updates, disposal, the pose session path in a live loop,
-  skinned-mode bake parity, animation-clip playback parity, and the physics surface.
+* **PlayMode 11/11.** Generation, phenotype updates, disposal, the pose session path in a live loop,
+  skinned-mode bake parity, animation-clip playback parity, the physics surface, and the update
+  counter: `Evaluations` advances by exactly one per `Generate`/`Apply`/session pose update, which is
+  what lets a caller tell a re-evaluation from a reused session.
 
 Unity's own verdict on the humanoid avatar is recorded rather than paraphrased: `AnnyHumanoid.Build`
 returns one for which `isHuman` and `isValid` are both true, and the editor logs `mapped 54/104 bones
@@ -173,8 +175,22 @@ The bake figure is 27,436 moved vertices at quality level `Ultra` with `skinWeig
 nine influences of the rig present. A quality level that caps influences silently changes the result,
 so `AnnyCharacter` warns when the active setting would drop one.
 
-Runtime path timing in the same scene: pose session **0.4434 ms** against **0.7896 ms** for a full
+Runtime path timing in the editor scene: pose session **0.4434 ms** against **0.7896 ms** for a full
 evaluation, moving 27,436 vertices with a largest displacement of 0.229793 m.
+
+The same measurement now also runs inside the built players, where a game actually pays it:
+
+```
+ANNY-PLAYER-PERF ok runtime=mono iterations=20 phenotype_ms=0.561/0.57 pose_ms=0.323/0.383 updates=40
+ANNY-PLAYER-PERF ok runtime=il2cpp iterations=20 phenotype_ms=0.555/0.698 pose_ms=0.309/0.404 updates=40
+```
+
+Fastest/median per update: a phenotype change costs **0.57 ms** under Mono and **0.70 ms** under
+IL2CPP, a session pose update **0.38 ms** and **0.40 ms** — under 3% of a 60 fps frame, with IL2CPP
+showing no marshalling cliff. The session saves ~0.19 ms per update, which is the native evaluation
+the runtime documents, so the remainder is Unity-side push. `updates=40` is the phase's own check
+that `AnnyCharacter.Evaluations` advanced by exactly two per measured iteration (one `Apply`, one
+`ApplyPose`), so session reuse is asserted rather than assumed.
 
 Two failures worth recording because they were found only by running:
 

@@ -51,9 +51,15 @@ The following remain the major successor workstream:
    path: the ceiling is 1.5-1.8x of `rest_model` even if the stage were free, and it is a loss
    below batch ~16 whatever the sparsity — "sparse" describes the neutral character, since
    varying the phenotypes switches 46-56% of the vector on.
-2. SIMD tuning.
-3. Unity Runtime/Editor package.
-4. Complete browser character editor.
+2. SIMD tuning — closed by measurement rather than omission: widening the target CPU is parity-safe and
+   worth 5-15% (`-C target-cpu=x86-64-v3`, opt-in, every pinned digest unchanged), and that ceiling is
+   what rules hand-written SIMD out (`docs/PERFORMANCE.md`).
+3. Unity Runtime/Editor package — delivered: UPM package, native binary packaging, managed ownership,
+   mesh and bone integration including a humanoid avatar Unity itself accepts, editor controls and
+   baking; EditMode 34/34, PlayMode 11/11, both Linux players built and run
+   (`integrations/unity/README.md`).
+4. Complete browser character editor — delivered: preview with phenotype/body/face/pose controls,
+   material controls, clip playback, presets and randomize, and GLB export; 14/14 against real Chrome.
 5. Serious profiling-driven performance optimization — the ranked list in `docs/PERFORMANCE.md` is now
    measured through and corrected: 2 closed (per-character accumulation at the hardware limit;
    zero-copy loading decided-and-declined), 1 answered and its stale number fixed (`derive measure` is
@@ -63,6 +69,11 @@ The following remain the major successor workstream:
    now delivered, and it was never actually blocked: wgpu 26 — the version in use — requires exactly the
    `js-sys`/`wasm-bindgen` versions this workspace pins, so no bump was needed and the 14/14 editor result
    was re-qualified on the new artifact rather than invalidated.
+6. Runtime-side cost accounting — closed for the Unity surface: the players now measure and check the
+   cost a game actually pays per update (`ANNY-PLAYER-PERF`), which is 0.57 ms median for a phenotype
+   change and 0.38 ms for a session pose update under Mono, 0.70/0.40 ms under IL2CPP, with a counter
+   assertion proving the session was reused. The Unity-side push, not the model, is now the larger
+   term, so a faster model path would not move a frame.
 
 Progress against that list is recorded in `docs/PERFORMANCE.md`: the prepare/reload, tensor-decode, precision-conversion and collision hot paths are done (9.6×, 2.1×, 1.82×, and 2.3× on the BVH build that dominated the remaining collision frame); the pose session is reachable from Rust, the CLI, C, C#, the WASM bindings and the browser; the serialized payload is byte-reproducible across processes; and the browser editor is built and passes 14 checks in a real Chromium (`examples/qualification/editor-smoke.cjs`). Zero-copy loading is decided rather than pending, and declined, in the section of `docs/PERFORMANCE.md` that states what an mmap path would preserve and what a trusted/prevalidated artifact path would have to be. Since then Unity has been integrated against the real installed editor and both Linux players build and run; the GPU backend has its first measured kernel (`docs/GPU.md`); the remaining CPU work is what is left.
 

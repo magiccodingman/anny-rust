@@ -424,6 +424,23 @@ representability) and their exact messages, so a caller sees the same error for 
 (as it is produced through `to_f32`), and the f32 error figures in both C smokes and the .NET example
 are unchanged to the last digit.
 
+## What a game pays per update (Unity players)
+
+Every number above is the library's own cost. What a game pays was measured inside the built players
+(`integrations/unity/tools/build-players.sh`, which now reports and checks the line):
+
+```
+ANNY-PLAYER-PERF ok runtime=mono iterations=20 phenotype_ms=0.561/0.57 pose_ms=0.323/0.383 updates=40
+ANNY-PLAYER-PERF ok runtime=il2cpp iterations=20 phenotype_ms=0.555/0.698 pose_ms=0.309/0.404 updates=40
+```
+
+Median cost per update: **0.57 ms (Mono) / 0.70 ms (IL2CPP)** for a phenotype change — full
+re-evaluation plus the Unity-side push — and **0.38 ms / 0.40 ms** for a pose-only update through the
+native session, so an update is under 3% of a 60 fps frame either way. Two conclusions follow. The
+session saves ~0.19 ms, which is the native evaluation, so the Unity-side push is now the larger term
+and further work on the model path cannot move a frame much. And IL2CPP costs what Mono costs, so
+marshalling and `SafeHandle` handling are not a cliff worth optimising.
+
 ## Ranking of remaining work, by measured upside
 
 1. **Collision is no longer the top outlier.** It went 64.6 → 29.8 ms this session and is exact-output

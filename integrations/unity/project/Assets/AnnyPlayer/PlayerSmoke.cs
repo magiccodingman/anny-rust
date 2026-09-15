@@ -136,7 +136,95 @@ namespace AnnyPlayer
                 report.SignedVolume,
                 RuntimeName));
 
+            return ok && Perf(character);
+        }
+
+        /// <summary>
+        /// Measures what a game pays per update inside a real player: changing a slider re-evaluates the
+        /// whole model, while a pose-only update goes through the native session. The counter deltas are
+        /// checked alongside the times, so "the session was reused" is evidence rather than an
+        /// assumption.
+        /// </summary>
+        private static bool Perf(AnnyCharacter character)
+        {
+            const int iterations = 20;
+            string bone = character.Rig.Labels[0];
+            string poseJson = AnnyRepresentation.NamedPosesToJson(
+                new System.Collections.Generic.Dictionary<string, Matrix4x4>
+                {
+                    { bone, Matrix4x4.Rotate(Quaternion.Euler(10f, 0f, 0f)) }
+                });
+
+            int baseline = character.Evaluations;
+            double[] phenotype = new double[iterations];
+            double[] pose = new double[iterations];
+
+            for (int i = 0; i < iterations; i++)
+            {
+                character.SetPhenotype("gender", i % 2 == 0 ? 0.35f : 0.65f);
+                System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
+                character.Apply();
+                watch.Stop();
+                phenotype[i] = watch.Elapsed.TotalMilliseconds;
+            }
+
+            for (int i = 0; i < iterations; i++)
+            {
+                System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
+                character.ApplyPose(poseJson);
+                watch.Stop();
+                pose[i] = watch.Elapsed.TotalMilliseconds;
+            }
+
+            int updates = character.Evaluations - baseline;
+            bool ok = updates == 2 * iterations && AllAboveZero(phenotype) && AllAboveZero(pose);
+
+            Debug.Log(string.Format(
+                "ANNY-PLAYER-PERF {0} runtime={1} iterations={2} phenotype_ms={3:0.###}/{4:0.###} " +
+                "pose_ms={5:0.###}/{6:0.###} updates={7}",
+                ok ? "ok" : "fail",
+                RuntimeName,
+                iterations,
+                Minimum(phenotype),
+                Median(phenotype),
+                Minimum(pose),
+                Median(pose),
+                updates));
+
             return ok;
+        }
+
+        /// <summary>Smallest sample, the fast end of a per-update cost.</summary>
+        private static double Minimum(double[] samples)
+        {
+            double low = samples[0];
+            for (int i = 1; i < samples.Length; i++)
+            {
+                low = Math.Min(low, samples[i]);
+            }
+
+            return low;
+        }
+
+        /// <summary>Median of the samples (sorted in place), the typical per-update cost.</summary>
+        private static double Median(double[] samples)
+        {
+            Array.Sort(samples);
+            return samples[samples.Length / 2];
+        }
+
+        /// <summary>True when every sample is a real measurement rather than a zeroed slot.</summary>
+        private static bool AllAboveZero(double[] samples)
+        {
+            for (int i = 0; i < samples.Length; i++)
+            {
+                if (!(samples[i] > 0.0))
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         /// <summary>Which scripting backend this player was built with, as reported in the smoke line.</summary>

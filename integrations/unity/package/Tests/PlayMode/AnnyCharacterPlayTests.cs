@@ -280,5 +280,33 @@ namespace Anny.Tests
 
             Assert.IsTrue(runtime.IsDisposed, "the native model must be released with the component");
         }
+
+        /// <summary>
+        /// `Evaluations` is a public diagnostic, so its unit has to be one update: a caller reads the
+        /// delta to tell a re-evaluation from a reused pose session, and a counter that adds two per
+        /// update silently doubles the cost it reports.
+        /// </summary>
+        [Test]
+        public void Updates_are_counted_once_each()
+        {
+            AnnyCharacter run = Spawn(AnnyUpdateMode.Skinned);
+
+            Assert.IsNotNull(run.Session, "the character must open a native pose session");
+            Assert.AreEqual(1, run.Evaluations, "generating is the first update");
+
+            run.SetPhenotype("gender", 0.5f);
+            run.Apply();
+            Assert.AreEqual(2, run.Evaluations, "a phenotype update adds exactly one");
+
+            string bone = run.Rig.Labels[0];
+            string poseJson = AnnyRepresentation.NamedPosesToJson(
+                new System.Collections.Generic.Dictionary<string, Matrix4x4>
+                {
+                    { bone, Matrix4x4.Rotate(Quaternion.Euler(10f, 0f, 0f)) }
+                });
+            run.ApplyPose(poseJson);
+
+            Assert.AreEqual(3, run.Evaluations, "a session pose update adds exactly one");
+        }
     }
 }

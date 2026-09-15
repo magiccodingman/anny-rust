@@ -50,6 +50,14 @@ for pair in "mono:PlayerBuild.LinuxMonoBatch" "il2cpp:PlayerBuild.LinuxIl2cppBat
         tail -6 "$runlog"
         status=1
     fi
+    if ! grep -h "ANNY-PLAYER-PERF" "$runlog" | head -2; then
+        echo "FAIL: player produced no perf line"
+        tail -6 "$runlog"
+        status=1
+    elif grep -h "ANNY-PLAYER-PERF fail" "$runlog"; then
+        echo "FAIL: the player's perf phase reported failure"
+        status=1
+    fi
 done
 
 echo "=== build-players status: $status ==="

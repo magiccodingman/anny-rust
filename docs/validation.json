@@ -233,9 +233,15 @@
     "il2cpp": {
       "backend": "il2cpp",
       "bones": 104,
-      "bytes": 284477938,
+      "bytes": 287192735,
       "influences": 9,
       "mesh_vertices": 82260,
+      "per_update_ms": {
+        "iterations": 20,
+        "phenotype": {"median": 0.698, "min": 0.555},
+        "pose_session": {"median": 0.404, "min": 0.309},
+        "updates_counted": 40
+      },
       "ran": true,
       "result": "Succeeded",
       "signed_volume": 0.05101392,
@@ -245,25 +251,31 @@
     "mono": {
       "backend": "mono",
       "bones": 104,
-      "bytes": 97037827,
+      "bytes": 97049779,
       "influences": 9,
       "mesh_vertices": 82260,
+      "per_update_ms": {
+        "iterations": 20,
+        "phenotype": {"median": 0.57, "min": 0.561},
+        "pose_session": {"median": 0.383, "min": 0.323},
+        "updates_counted": 40
+      },
       "ran": true,
       "result": "Succeeded",
       "signed_volume": 0.05101393,
       "triangles": 27420,
       "vertices": 13718
     },
-    "note": "Both players build from the same scene and generate the same character through the native plugin. Geometry, topology, influence width and signed volume are identical across backends; the signed volume differs only in the last float digit.",
+    "note": "Both players build from the same scene and generate the same character through the native plugin. Geometry, topology, influence width and signed volume are identical across backends; the signed volume differs only in the last float digit. Each run also measures the per-update cost in the player and checks that AnnyCharacter.Evaluations advanced by exactly two per measured iteration.",
     "script": "integrations/unity/tools/build-players.sh"
   },
   "unity_players_tested": true,
   "unity_playmode": {
     "failed": 0,
     "name": "Unity PlayMode suites",
-    "notes": "includes three physics tests and two animation tests",
-    "passed": 10,
-    "total": 10
+    "notes": "includes three physics tests, two animation tests and the update-counter test that pins one count per update",
+    "passed": 11,
+    "total": 11
   },
   "unity_tested": true,
   "upstream_revision": "81ca83e202273b306205c1cc15f33734be31e48c",
