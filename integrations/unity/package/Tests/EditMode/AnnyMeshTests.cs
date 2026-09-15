@@ -287,6 +287,7 @@ namespace Anny.Tests
                 Matrix4x4[] bindPoses = built.Mesh.bindposes;
                 var perVertex = built.Mesh.GetBonesPerVertex();
                 var influences = built.Mesh.GetAllBoneWeights();
+                AnnyTensorF32 posed = output.Tensor(AnnyOutputF32.Vertices);
                 AnnyTensorF32 rest = output.Tensor(AnnyOutputF32.RestVertices);
 
                 double worstSumError = 0.0;
@@ -310,7 +311,7 @@ namespace Anny.Tests
 
                     int source = built.CornerSource != null ? built.CornerSource[v] : v;
                     Vector3 expected = AnnyRepresentation.ToUnityPosition(
-                        rest.Data[source * 3], rest.Data[source * 3 + 1], rest.Data[source * 3 + 2]);
+                        posed.Data[source * 3], posed.Data[source * 3 + 1], posed.Data[source * 3 + 2]);
                     worstReference = Math.Max(worstReference, (accumulated - expected).magnitude);
                 }
 
@@ -319,11 +320,22 @@ namespace Anny.Tests
                 float worstUnity = 0f;
                 for (int v = 0; v < bakedVertices.Length; v++)
                 {
-                    int source = built.CornerSource != null ? built.CornerSource[v] : v;
-                    Vector3 expected = AnnyRepresentation.ToUnityPosition(
-                        rest.Data[source * 3], rest.Data[source * 3 + 1], rest.Data[source * 3 + 2]);
-                    worstUnity = Mathf.Max(worstUnity, (bakedVertices[v] - expected).magnitude);
+                    worstUnity = Mathf.Max(worstUnity, (bakedVertices[v] - vertices[v]).magnitude);
                 }
+
+                // Reported, not asserted: the nominal rest array and the evaluated rest pose are not
+                // the same array. That difference belongs to the model, not to this integration.
+                float restVersusPosed = 0f;
+                for (int v = 0; v < wide.Description.vertices; v++)
+                {
+                    Vector3 a = AnnyRepresentation.ToUnityPosition(
+                        posed.Data[v * 3], posed.Data[v * 3 + 1], posed.Data[v * 3 + 2]);
+                    Vector3 b = AnnyRepresentation.ToUnityPosition(
+                        rest.Data[v * 3], rest.Data[v * 3 + 1], rest.Data[v * 3 + 2]);
+                    restVersusPosed = Mathf.Max(restVersusPosed, (a - b).magnitude);
+                }
+                UnityEngine.Debug.Log(
+                    "rest_vertices vs evaluated vertices: worst " + restVersusPosed.ToString("G6") + " m");
 
                 UnityEngine.Debug.Log(
                     "skinned skinning data: worst influence-sum error " + worstSumError.ToString("G6") +
@@ -332,7 +344,8 @@ namespace Anny.Tests
                     " m, vertices " + vertices.Length);
 
                 Assert.Less(worstSumError, 1e-4, "influences must sum to one at every vertex");
-                Assert.Less(worstReference, 1e-3, "reference LBS deviation at the bind pose, metres");
+                Assert.Less(worstReference, 1e-4, "the skinning data must be the identity map at the bind pose");
+                Assert.Less(worstUnity, 1e-3, "Unity's bake must agree with the reference skinning");
             }
             finally
             {
